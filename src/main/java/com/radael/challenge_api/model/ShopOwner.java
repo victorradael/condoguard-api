@@ -8,7 +8,10 @@ public class ShopOwner {
     @Id
     private String id;
     private String name;
+    private String phoneNumber;
+    private String email;
     private String shopName;
+    private Integer shopNumber;
 
     // Construtor padrão
     public ShopOwner() {
@@ -37,6 +40,30 @@ public class ShopOwner {
         this.name = name;
     }
 
+    public String getPhoneNumber() {
+        return phoneNumber;
+    }
+
+    public void setPhoneNumber(String phoneNumber) {
+        this.phoneNumber = phoneNumber;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
+    }
+
+    public Integer getShopNumber() {
+        return shopNumber;
+    }
+
+    public void setShopNumber(Integer shopNumber) {
+        this.shopNumber = shopNumber;
+    }
+
     public String getShopName() {
         return shopName;
     }
@@ -51,7 +78,10 @@ public class ShopOwner {
         return "ShopOwner{" +
                 "id='" + id + '\'' +
                 ", name='" + name + '\'' +
+                ", phoneNumber='" + phoneNumber + '\'' +
+                ", email='" + email + '\'' +
                 ", shopName='" + shopName + '\'' +
+                ", shopNumber='" + shopNumber + '\'' +
                 '}';
     }
 

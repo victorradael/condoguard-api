@@ -8,7 +8,10 @@ public class Resident {
     @Id
     private String id;
     private String name;
+    private String phoneNumber;
+    private String email;
     private String apartmentType; // "normal" ou "duplex"
+    private Integer apartmentNumber;
 
     // Construtor padrão
     public Resident() {
@@ -37,6 +40,30 @@ public class Resident {
         this.name = name;
     }
 
+    public String getPhoneNumber() {
+        return phoneNumber;
+    }
+
+    public void setPhoneNumber(String phoneNumber) {
+        this.phoneNumber = phoneNumber;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
+    }
+
+    public Integer getApartmentNumber() {
+        return apartmentNumber;
+    }
+
+    public void setApartmentNumber(Integer apartmentNumber) {
+        this.apartmentNumber = apartmentNumber;
+    }
+
     public String getApartmentType() {
         return apartmentType;
     }
@@ -59,7 +86,10 @@ public class Resident {
         return "Resident{" +
                 "id='" + id + '\'' +
                 ", name='" + name + '\'' +
+                ", phoneNumber='" + phoneNumber + '\'' +
+                ", email='" + email + '\'' +
                 ", apartmentType='" + apartmentType + '\'' +
+                ", apartmentNumber='" + apartmentNumber + '\'' +
                 '}';
     }
 
