@@ -1,4 +1,4 @@
-package com.radael.challenge_api.security;
+package com.radael.condoguard.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -14,8 +14,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
-import com.radael.challenge_api.errors.CustomAuthenticationEntryPoint;
-import com.radael.challenge_api.service.CustomUserDetailsService;
+import com.radael.condoguard.errors.CustomAuthenticationEntryPoint;
+import com.radael.condoguard.service.CustomUserDetailsService;
 
 @Configuration
 @EnableWebSecurity

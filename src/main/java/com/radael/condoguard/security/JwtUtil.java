@@ -1,4 +1,4 @@
-package com.radael.challenge_api.security;
+package com.radael.condoguard.security;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;

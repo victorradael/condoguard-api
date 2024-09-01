@@ -1,12 +1,12 @@
-package com.radael.challenge_api.controller;
+package com.radael.condoguard.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
-import com.radael.challenge_api.model.User;
-import com.radael.challenge_api.repository.UserRepository;
+import com.radael.condoguard.model.User;
+import com.radael.condoguard.repository.UserRepository;
 
 import java.util.List;
 import java.util.Optional;

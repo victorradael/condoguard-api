@@ -1,10 +1,10 @@
-package com.radael.challenge_api.controller;
+package com.radael.condoguard.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
-import com.radael.challenge_api.model.Resident;
-import com.radael.challenge_api.service.ResidentService;
+import com.radael.condoguard.model.Resident;
+import com.radael.condoguard.service.ResidentService;
 
 import java.util.List;
 import java.util.Optional;

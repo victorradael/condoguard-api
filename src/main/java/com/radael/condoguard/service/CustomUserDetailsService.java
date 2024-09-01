@@ -1,4 +1,4 @@
-package com.radael.challenge_api.service;
+package com.radael.condoguard.service;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -7,8 +7,8 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.stereotype.Service;
 
-import com.radael.challenge_api.repository.UserRepository;
-import com.radael.challenge_api.model.User; // Seu modelo de usuário customizado
+import com.radael.condoguard.model.User;
+import com.radael.condoguard.repository.UserRepository;
 
 import java.util.Set;
 import java.util.stream.Collectors;

@@ -1,4 +1,4 @@
-package com.radael.challenge_api.security;
+package com.radael.condoguard.security;
 
 import org.springframework.lang.NonNull;  // Importa a anotação NonNull
 import org.springframework.security.core.context.SecurityContextHolder;

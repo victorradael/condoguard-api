@@ -1,4 +1,4 @@
-package com.radael.challenge_api.model;
+package com.radael.condoguard.model;
 
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;

@@ -1,10 +1,10 @@
-package com.radael.challenge_api.service;
+package com.radael.condoguard.service;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import com.radael.challenge_api.model.ShopOwner;
-import com.radael.challenge_api.repository.ShopOwnerRepository;
+import com.radael.condoguard.model.ShopOwner;
+import com.radael.condoguard.repository.ShopOwnerRepository;
 
 import java.util.List;
 import java.util.Optional;

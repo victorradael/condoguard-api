@@ -1,10 +1,10 @@
-package com.radael.challenge_api.controller;
+package com.radael.condoguard.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
-import com.radael.challenge_api.model.Notification;
-import com.radael.challenge_api.service.NotificationService;
+import com.radael.condoguard.model.Notification;
+import com.radael.condoguard.service.NotificationService;
 
 @RestController
 @RequestMapping("/notifications")

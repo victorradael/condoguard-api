@@ -1,4 +1,4 @@
-package com.radael.challenge_api.dto;
+package com.radael.condoguard.dto;
 
 public class AuthRequest {
     private String username;

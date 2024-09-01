@@ -1,4 +1,4 @@
-package com.radael.challenge_api.errors;
+package com.radael.condoguard.errors;
 
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.AuthenticationEntryPoint;

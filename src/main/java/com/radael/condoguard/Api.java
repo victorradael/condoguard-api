@@ -1,4 +1,4 @@
-package com.radael.challenge_api;
+package com.radael.condoguard;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
