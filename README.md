@@ -1,3 +1,8 @@
+<div style="text-align: center;">
+    <img src="assets/condoguard-logo.svg" alt="CondoguardLogo" width="200" height="200">
+</div>
+
+
 # CondoGuard
 
 CondoGuard é um aplicativo em desenvolvimento que visa ajudar os condôminos a administrar suas despesas condominiais de forma eficiente e preventiva. Com uma abordagem inovadora, o CondoGuard permite que os usuários gerenciem suas despesas, façam previsões financeiras e identifiquem possíveis problemas antes que eles se tornem críticos.
