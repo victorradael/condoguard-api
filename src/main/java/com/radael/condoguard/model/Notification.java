@@ -21,25 +21,29 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.util.Date;
+import java.util.List;
 import java.util.Objects;
 
 @Document(collection = "notifications")
 public class Notification {
     @Id
     private String id;
-    private String content;
-    private String groupName;
-    private Date sentAt;
+    private String message; // Mensagem da notificação
+    private User createdBy; // Usuário que criou a notificação
+    private Date createdAt; // Data de criação da notificação
+    private List<Resident> residents; // Destinatários (residências)
+    private List<ShopOwner> shopOwners; // Destinatários (lojas)
 
     // Construtor padrão
-    public Notification() {
-    }
+    public Notification() {}
 
     // Construtor com parâmetros
-    public Notification(String content, String groupName, Date sentAt) {
-        this.content = content;
-        this.groupName = groupName;
-        this.sentAt = sentAt != null ? new Date(sentAt.getTime()) : null; // Defensiva contra mutabilidade
+    public Notification(String message, User createdBy, Date createdAt, List<Resident> residents, List<ShopOwner> shopOwners) {
+        this.message = message;
+        this.createdBy = createdBy;
+        this.createdAt = (createdAt != null) ? new Date(createdAt.getTime()) : null; // Cópia defensiva para evitar mutabilidade
+        this.residents = residents;
+        this.shopOwners = shopOwners;
     }
 
     // Getters e Setters
@@ -51,56 +55,74 @@ public class Notification {
         this.id = id;
     }
 
-    public String getContent() {
-        return content;
+    public String getMessage() {
+        return message;
     }
 
-    public void setContent(String content) {
-        this.content = content;
+    public void setMessage(String message) {
+        this.message = message;
     }
 
-    public String getGroupName() {
-        return groupName;
+    public User getCreatedBy() {
+        return createdBy;
     }
 
-    public void setGroupName(String groupName) {
-        this.groupName = groupName;
+    public void setCreatedBy(User createdBy) {
+        this.createdBy = createdBy;
     }
 
-    public Date getSentAt() {
-        return sentAt != null ? new Date(sentAt.getTime()) : null; // Evita retorno de referência mutável
+    public Date getCreatedAt() {
+        return (createdAt != null) ? new Date(createdAt.getTime()) : null; // Retorna uma cópia defensiva
     }
 
-    public void setSentAt(Date sentAt) {
-        this.sentAt = sentAt != null ? new Date(sentAt.getTime()) : null;
+    public void setCreatedAt(Date createdAt) {
+        this.createdAt = (createdAt != null) ? new Date(createdAt.getTime()) : null;
     }
 
-    // Método toString para facilitar a exibição dos dados da Notification
+    public List<Resident> getResidents() {
+        return residents;
+    }
+
+    public void setResidents(List<Resident> residents) {
+        this.residents = residents;
+    }
+
+    public List<ShopOwner> getShopOwners() {
+        return shopOwners;
+    }
+
+    public void setShopOwners(List<ShopOwner> shopOwners) {
+        this.shopOwners = shopOwners;
+    }
+
+    // Métodos toString, equals e hashCode
     @Override
     public String toString() {
         return "Notification{" +
                 "id='" + id + '\'' +
-                ", content='" + content + '\'' +
-                ", groupName='" + groupName + '\'' +
-                ", sentAt=" + sentAt +
+                ", message='" + message + '\'' +
+                ", createdBy=" + (createdBy != null ? createdBy.getUsername() : null) +
+                ", createdAt=" + createdAt +
+                ", residents=" + residents +
+                ", shopOwners=" + shopOwners +
                 '}';
     }
 
-    // Override do método equals para comparação precisa entre objetos Notification
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         Notification that = (Notification) o;
         return Objects.equals(id, that.id) &&
-               Objects.equals(content, that.content) &&
-               Objects.equals(groupName, that.groupName) &&
-               Objects.equals(sentAt, that.sentAt);
+               Objects.equals(message, that.message) &&
+               Objects.equals(createdBy, that.createdBy) &&
+               Objects.equals(createdAt, that.createdAt) &&
+               Objects.equals(residents, that.residents) &&
+               Objects.equals(shopOwners, that.shopOwners);
     }
 
-    // Override do método hashCode para uso eficiente em coleções
     @Override
     public int hashCode() {
-        return Objects.hash(id, content, groupName, sentAt);
+        return Objects.hash(id, message, createdBy, createdAt, residents, shopOwners);
     }
 }
