@@ -19,42 +19,37 @@ package com.radael.condoguard.service;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-
-import com.radael.condoguard.model.Resident;
-import com.radael.condoguard.repository.ResidentRepository;
-
+import com.radael.condoguard.model.User;
+import com.radael.condoguard.repository.UserRepository;
 import java.util.List;
 import java.util.Optional;
 
 @Service
-public class ResidentService {
-    
+public class UserService {
     @Autowired
-    private ResidentRepository residentRepository;
+    private UserRepository userRepository;
 
-    public List<Resident> getAllResidents() {
-        return residentRepository.findAll();
+    public List<User> getAllUsers() {
+        return userRepository.findAll();
     }
 
-    public Optional<Resident> getResidentById(String id) {
-        return residentRepository.findById(id);
+    public Optional<User> getUserById(String id) {
+        return userRepository.findById(id);
     }
 
-    public Resident createResident(Resident resident) {
-        return residentRepository.save(resident);
+    public User createUser(User user) {
+        return userRepository.save(user);
     }
 
-    public Resident updateResident(String id, Resident residentDetails) {
-        Resident resident = residentRepository.findById(id).orElseThrow(() -> new RuntimeException("Resident not found"));
-        resident.setUnitNumber(residentDetails.getUnitNumber());
-        resident.setFloor(residentDetails.getFloor());
+    public User updateUser(String id, User userDetails) {
+        User user = userRepository.findById(id).orElseThrow(() -> new RuntimeException("User not found"));
+        user.setUsername(userDetails.getUsername());
+        user.setEmail(userDetails.getEmail());
         // Atualize outros campos conforme necessário
-        return residentRepository.save(resident);
+        return userRepository.save(user);
     }
 
-    public void deleteResident(String id) {
-        residentRepository.deleteById(id);
+    public void deleteUser(String id) {
+        userRepository.deleteById(id);
     }
 }
-
-

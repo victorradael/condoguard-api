@@ -18,18 +18,18 @@
 package com.radael.condoguard.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import com.radael.condoguard.model.ShopOwner;
 import com.radael.condoguard.service.ShopOwnerService;
 
 import java.util.List;
-import java.util.Optional;
 
 @RestController
-@RequestMapping("/shopowners")
+@RequestMapping("/shopOwners")
 public class ShopOwnerController {
-
+    
     @Autowired
     private ShopOwnerService shopOwnerService;
 
@@ -39,8 +39,10 @@ public class ShopOwnerController {
     }
 
     @GetMapping("/{id}")
-    public Optional<ShopOwner> getShopOwnerById(@PathVariable String id) {
-        return shopOwnerService.getShopOwnerById(id);
+    public ResponseEntity<ShopOwner> getShopOwnerById(@PathVariable String id) {
+        return shopOwnerService.getShopOwnerById(id)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping
@@ -49,12 +51,13 @@ public class ShopOwnerController {
     }
 
     @PutMapping("/{id}")
-    public ShopOwner updateShopOwner(@PathVariable String id, @RequestBody ShopOwner shopOwnerDetails) {
-        return shopOwnerService.updateShopOwner(id, shopOwnerDetails);
+    public ResponseEntity<ShopOwner> updateShopOwner(@PathVariable String id, @RequestBody ShopOwner shopOwnerDetails) {
+        return ResponseEntity.ok(shopOwnerService.updateShopOwner(id, shopOwnerDetails));
     }
 
     @DeleteMapping("/{id}")
-    public void deleteShopOwner(@PathVariable String id) {
+    public ResponseEntity<Void> deleteShopOwner(@PathVariable String id) {
         shopOwnerService.deleteShopOwner(id);
+        return ResponseEntity.noContent().build();
     }
 }

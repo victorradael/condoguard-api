@@ -21,6 +21,7 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
@@ -29,17 +30,24 @@ public class User {
     @Id
     private String id;
     private String username;
-    private String password; // Armazena o hash da senha
+    private String password; // Armazenar hash da senha
+    private String email;
     private Set<String> roles = new HashSet<>(); // Ex: ["ROLE_USER", "ROLE_ADMIN"]
+    private List<Resident> residents; // Associação com residências
+    private List<ShopOwner> shopOwners; // Associação com lojas
 
     // Construtor padrão
     public User() {}
 
     // Construtor com parâmetros
-    public User(String username, String password, Set<String> roles) {
+    public User(String username, String password, String email, Set<String> roles,
+                List<Resident> residents, List<ShopOwner> shopOwners) {
         this.username = username;
-        this.setPassword(password); // Chama o setter para garantir o hash da senha
+        this.setPassword(password); // Usa o setter para garantir o hash
+        this.email = email;
         this.roles = roles != null ? new HashSet<>(roles) : new HashSet<>();
+        this.residents = residents;
+        this.shopOwners = shopOwners;
     }
 
     // Getters e Setters
@@ -67,6 +75,14 @@ public class User {
         this.password = password;
     }
 
+    public String getEmail() {
+        return email;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
+    }
+
     public Set<String> getRoles() {
         return new HashSet<>(roles); // Retorna uma cópia defensiva
     }
@@ -75,27 +91,35 @@ public class User {
         this.roles = roles != null ? new HashSet<>(roles) : new HashSet<>();
     }
 
-    // Método para adicionar uma role
-    public void addRole(String role) {
-        this.roles.add(role);
+    public List<Resident> getResidents() {
+        return residents;
     }
 
-    // Método para remover uma role
-    public void removeRole(String role) {
-        this.roles.remove(role);
+    public void setResidents(List<Resident> residents) {
+        this.residents = residents;
     }
 
-    // Método toString para depuração
+    public List<ShopOwner> getShopOwners() {
+        return shopOwners;
+    }
+
+    public void setShopOwners(List<ShopOwner> shopOwners) {
+        this.shopOwners = shopOwners;
+    }
+
+    // Métodos toString, equals e hashCode
     @Override
     public String toString() {
         return "User{" +
                 "id='" + id + '\'' +
                 ", username='" + username + '\'' +
+                ", email='" + email + '\'' +
                 ", roles=" + roles +
+                ", residents=" + residents +
+                ", shopOwners=" + shopOwners +
                 '}';
     }
 
-    // Override do método equals para comparação precisa
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -103,13 +127,14 @@ public class User {
         User user = (User) o;
         return Objects.equals(id, user.id) &&
                Objects.equals(username, user.username) &&
-               Objects.equals(roles, user.roles);
+               Objects.equals(email, user.email) &&
+               Objects.equals(roles, user.roles) &&
+               Objects.equals(residents, user.residents) &&
+               Objects.equals(shopOwners, user.shopOwners);
     }
 
-    // Override do método hashCode para uso eficiente em coleções
     @Override
     public int hashCode() {
-        return Objects.hash(id, username, roles);
+        return Objects.hash(id, username, email, roles, residents, shopOwners);
     }
 }
-

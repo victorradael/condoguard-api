@@ -18,72 +18,58 @@
 package com.radael.condoguard.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import com.radael.condoguard.model.User;
-import com.radael.condoguard.repository.UserRepository;
+import com.radael.condoguard.service.UserService;
 
 import java.util.List;
-import java.util.Optional;
 
 @RestController
 @RequestMapping("/users")
 public class UserController {
 
     @Autowired
-    private UserRepository userRepository;
-
-    @Autowired
-    private PasswordEncoder passwordEncoder;
+    private UserService userService;
 
     // Endpoint para listar todos os usuários (apenas para administradores)
     @GetMapping
     @PreAuthorize("hasRole('ADMIN')")
     public List<User> getAllUsers() {
-        return userRepository.findAll();
+        return userService.getAllUsers();
     }
 
     // Endpoint para obter um usuário específico por ID (apenas para administradores)
     @GetMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    public Optional<User> getUserById(@PathVariable String id) {
-        return userRepository.findById(id);
+    public ResponseEntity<User> getUserById(@PathVariable String id) {
+        return userService.getUserById(id)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 
     // Endpoint para criar um novo usuário (apenas para administradores)
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
-    public String createUser(@RequestBody User user) {
-        user.setPassword(passwordEncoder.encode(user.getPassword()));
-        userRepository.save(user);
-        return "User created successfully!";
+    public User createUser(@RequestBody User user) {
+        return userService.createUser(user);
     }
 
     // Endpoint para atualizar um usuário existente (apenas para administradores)
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    public String updateUser(@PathVariable String id, @RequestBody User userDetails) {
-        Optional<User> userOptional = userRepository.findById(id);
-        if (userOptional.isPresent()) {
-            User user = userOptional.get();
-            user.setUsername(userDetails.getUsername());
-            user.setPassword(passwordEncoder.encode(userDetails.getPassword()));
-            user.setRoles(userDetails.getRoles());
-            userRepository.save(user);
-            return "User updated successfully!";
-        } else {
-            return "User not found!";
-        }
+    public ResponseEntity<User> updateUser(@PathVariable String id, @RequestBody User userDetails) {
+        return ResponseEntity.ok(userService.updateUser(id, userDetails));
     }
 
     // Endpoint para deletar um usuário (apenas para administradores)
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    public String deleteUser(@PathVariable String id) {
-        userRepository.deleteById(id);
-        return "User deleted successfully!";
+    public ResponseEntity<Void> deleteUser(@PathVariable String id) {
+        userService.deleteUser(id);
+        return ResponseEntity.noContent().build();
     }
 }
 

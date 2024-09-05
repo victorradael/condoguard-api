@@ -21,43 +21,44 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import com.radael.condoguard.model.Notification;
-import com.radael.condoguard.service.NotificationService;
+import com.radael.condoguard.model.Expense;
+import com.radael.condoguard.service.ExpenseService;
 
 import java.util.List;
 
 @RestController
-@RequestMapping("/notifications")
-public class NotificationController {
+@RequestMapping("/expenses")
+public class ExpenseController {
 
     @Autowired
-    private NotificationService notificationService;
+    private ExpenseService expenseService;
 
     @GetMapping
-    public List<Notification> getAllNotifications() {
-        return notificationService.getAllNotifications();
+    public List<Expense> getAllExpenses() {
+        return expenseService.getAllExpenses();
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<Notification> getNotificationById(@PathVariable String id) {
-        return notificationService.getNotificationById(id)
+    public ResponseEntity<Expense> getExpenseById(@PathVariable String id) {
+        return expenseService.getExpenseById(id)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping
-    public Notification createNotification(@RequestBody Notification notification) {
-        return notificationService.createNotification(notification);
+    public Expense createExpense(@RequestBody Expense expense) {
+        return expenseService.createExpense(expense);
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<Notification> updateNotification(@PathVariable String id, @RequestBody Notification notificationDetails) {
-        return ResponseEntity.ok(notificationService.updateNotification(id, notificationDetails));
+    public ResponseEntity<Expense> updateExpense(@PathVariable String id, @RequestBody Expense expenseDetails) {
+        return ResponseEntity.ok(expenseService.updateExpense(id, expenseDetails));
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteNotification(@PathVariable String id) {
-        notificationService.deleteNotification(id);
+    public ResponseEntity<Void> deleteExpense(@PathVariable String id) {
+        expenseService.deleteExpense(id);
         return ResponseEntity.noContent().build();
     }
 }
+

@@ -28,7 +28,7 @@ import java.util.Optional;
 
 @Service
 public class ShopOwnerService {
-
+    
     @Autowired
     private ShopOwnerRepository shopOwnerRepository;
 
@@ -45,14 +45,11 @@ public class ShopOwnerService {
     }
 
     public ShopOwner updateShopOwner(String id, ShopOwner shopOwnerDetails) {
-        Optional<ShopOwner> optionalShopOwner = shopOwnerRepository.findById(id);
-        if (optionalShopOwner.isPresent()) {
-            ShopOwner shopOwner = optionalShopOwner.get();
-            shopOwner.setName(shopOwnerDetails.getName());
-            shopOwner.setShopName(shopOwnerDetails.getShopName());
-            return shopOwnerRepository.save(shopOwner);
-        }
-        return null;
+        ShopOwner shopOwner = shopOwnerRepository.findById(id).orElseThrow(() -> new RuntimeException("ShopOwner not found"));
+        shopOwner.setShopName(shopOwnerDetails.getShopName());
+        shopOwner.setFloor(shopOwnerDetails.getFloor());
+        // Atualize outros campos conforme necessário
+        return shopOwnerRepository.save(shopOwner);
     }
 
     public void deleteShopOwner(String id) {

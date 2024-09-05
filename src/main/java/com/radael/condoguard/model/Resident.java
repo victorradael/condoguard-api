@@ -20,24 +20,29 @@ package com.radael.condoguard.model;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
+import java.util.List;
+import java.util.Objects;
+
 @Document(collection = "residents")
 public class Resident {
     @Id
     private String id;
-    private String name;
-    private String phoneNumber;
-    private String email;
-    private String apartmentType; // "normal" ou "duplex"
-    private Integer apartmentNumber;
+    private String unitNumber; // Número da unidade
+    private int floor; // Andar
+    private User owner; // Associação com o proprietário
+    private List<Expense> expenses; // Lista de despesas associadas
+    private List<Notification> notifications; // Lista de notificações associadas
 
     // Construtor padrão
-    public Resident() {
-    }
+    public Resident() {}
 
     // Construtor com parâmetros
-    public Resident(String name, String apartmentType) {
-        this.name = name;
-        setApartmentType(apartmentType); // Utiliza o setter para validação
+    public Resident(String unitNumber, int floor, User owner, List<Expense> expenses, List<Notification> notifications) {
+        this.unitNumber = unitNumber;
+        this.floor = floor;
+        this.owner = owner;
+        this.expenses = expenses;
+        this.notifications = notifications;
     }
 
     // Getters e Setters
@@ -49,86 +54,74 @@ public class Resident {
         this.id = id;
     }
 
-    public String getName() {
-        return name;
+    public String getUnitNumber() {
+        return unitNumber;
     }
 
-    public void setName(String name) {
-        this.name = name;
+    public void setUnitNumber(String unitNumber) {
+        this.unitNumber = unitNumber;
     }
 
-    public String getPhoneNumber() {
-        return phoneNumber;
+    public int getFloor() {
+        return floor;
     }
 
-    public void setPhoneNumber(String phoneNumber) {
-        this.phoneNumber = phoneNumber;
+    public void setFloor(int floor) {
+        this.floor = floor;
     }
 
-    public String getEmail() {
-        return email;
+    public User getOwner() {
+        return owner;
     }
 
-    public void setEmail(String email) {
-        this.email = email;
+    public void setOwner(User owner) {
+        this.owner = owner;
     }
 
-    public Integer getApartmentNumber() {
-        return apartmentNumber;
+    public List<Expense> getExpenses() {
+        return expenses;
     }
 
-    public void setApartmentNumber(Integer apartmentNumber) {
-        this.apartmentNumber = apartmentNumber;
+    public void setExpenses(List<Expense> expenses) {
+        this.expenses = expenses;
     }
 
-    public String getApartmentType() {
-        return apartmentType;
+    public List<Notification> getNotifications() {
+        return notifications;
     }
 
-    public void setApartmentType(String apartmentType) {
-        if (!"normal".equalsIgnoreCase(apartmentType) && !"duplex".equalsIgnoreCase(apartmentType)) {
-            throw new IllegalArgumentException("Tipo de apartamento inválido: " + apartmentType);
-        }
-        this.apartmentType = apartmentType;
+    public void setNotifications(List<Notification> notifications) {
+        this.notifications = notifications;
     }
 
-    // Método utilitário para verificar se o apartamento é duplex
-    public boolean isDuplex() {
-        return "duplex".equalsIgnoreCase(this.apartmentType);
-    }
-
-    // Método toString para facilitar a exibição dos dados do Resident
+    // Métodos toString, equals e hashCode
     @Override
     public String toString() {
         return "Resident{" +
                 "id='" + id + '\'' +
-                ", name='" + name + '\'' +
-                ", phoneNumber='" + phoneNumber + '\'' +
-                ", email='" + email + '\'' +
-                ", apartmentType='" + apartmentType + '\'' +
-                ", apartmentNumber='" + apartmentNumber + '\'' +
+                ", unitNumber='" + unitNumber + '\'' +
+                ", floor=" + floor +
+                ", owner=" + (owner != null ? owner.getUsername() : null) +
+                ", expenses=" + expenses +
+                ", notifications=" + notifications +
                 '}';
     }
 
-    // Override do método equals para comparação precisa entre objetos Resident
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-
         Resident resident = (Resident) o;
-
-        if (!id.equals(resident.id)) return false;
-        if (!name.equals(resident.name)) return false;
-        return apartmentType.equals(resident.apartmentType);
+        return floor == resident.floor &&
+               Objects.equals(id, resident.id) &&
+               Objects.equals(unitNumber, resident.unitNumber) &&
+               Objects.equals(owner, resident.owner) &&
+               Objects.equals(expenses, resident.expenses) &&
+               Objects.equals(notifications, resident.notifications);
     }
 
-    // Override do método hashCode para uso eficiente em coleções
     @Override
     public int hashCode() {
-        int result = id.hashCode();
-        result = 31 * result + name.hashCode();
-        result = 31 * result + apartmentType.hashCode();
-        return result;
+        return Objects.hash(id, unitNumber, floor, owner, expenses, notifications);
     }
 }

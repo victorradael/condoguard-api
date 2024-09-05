@@ -18,13 +18,13 @@
 package com.radael.condoguard.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import com.radael.condoguard.model.Resident;
 import com.radael.condoguard.service.ResidentService;
 
 import java.util.List;
-import java.util.Optional;
 
 @RestController
 @RequestMapping("/residents")
@@ -39,8 +39,10 @@ public class ResidentController {
     }
 
     @GetMapping("/{id}")
-    public Optional<Resident> getResidentById(@PathVariable String id) {
-        return residentService.getResidentById(id);
+    public ResponseEntity<Resident> getResidentById(@PathVariable String id) {
+        return residentService.getResidentById(id)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping
@@ -49,12 +51,13 @@ public class ResidentController {
     }
 
     @PutMapping("/{id}")
-    public Resident updateResident(@PathVariable String id, @RequestBody Resident residentDetails) {
-        return residentService.updateResident(id, residentDetails);
+    public ResponseEntity<Resident> updateResident(@PathVariable String id, @RequestBody Resident residentDetails) {
+        return ResponseEntity.ok(residentService.updateResident(id, residentDetails));
     }
 
     @DeleteMapping("/{id}")
-    public void deleteResident(@PathVariable String id) {
+    public ResponseEntity<Void> deleteResident(@PathVariable String id) {
         residentService.deleteResident(id);
+        return ResponseEntity.noContent().build();
     }
 }
