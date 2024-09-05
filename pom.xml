@@ -9,9 +9,9 @@
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>com.radael</groupId>
-	<artifactId>initiate-spring-dev</artifactId>
+	<artifactId>condoguard</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>initiate-spring-dev</name>
+	<name>condoguard</name>
 	<description>Demo project for Spring Boot</description>
 	<url/>
 	<licenses>
