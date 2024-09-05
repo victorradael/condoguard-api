@@ -28,7 +28,7 @@ import java.util.Optional;
 
 @Service
 public class ResidentService {
-
+    
     @Autowired
     private ResidentRepository residentRepository;
 
@@ -45,18 +45,16 @@ public class ResidentService {
     }
 
     public Resident updateResident(String id, Resident residentDetails) {
-        Optional<Resident> optionalResident = residentRepository.findById(id);
-        if (optionalResident.isPresent()) {
-            Resident resident = optionalResident.get();
-            resident.setName(residentDetails.getName());
-            resident.setApartmentType(residentDetails.getApartmentType());
-            return residentRepository.save(resident);
-        }
-        return null;
+        Resident resident = residentRepository.findById(id).orElseThrow(() -> new RuntimeException("Resident not found"));
+        resident.setUnitNumber(residentDetails.getUnitNumber());
+        resident.setFloor(residentDetails.getFloor());
+        // Atualize outros campos conforme necessário
+        return residentRepository.save(resident);
     }
 
     public void deleteResident(String id) {
         residentRepository.deleteById(id);
     }
 }
+
 
