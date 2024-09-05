@@ -20,24 +20,29 @@ package com.radael.condoguard.model;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
+import java.util.List;
+import java.util.Objects;
+
 @Document(collection = "shopOwners")
 public class ShopOwner {
     @Id
     private String id;
-    private String name;
-    private String phoneNumber;
-    private String email;
-    private String shopName;
-    private Integer shopNumber;
+    private String shopName; // Nome da loja
+    private int floor; // Andar onde a loja está localizada
+    private User owner; // Associação com o proprietário (usuário)
+    private List<Expense> expenses; // Lista de despesas associadas
+    private List<Notification> notifications; // Lista de notificações associadas
 
     // Construtor padrão
-    public ShopOwner() {
-    }
+    public ShopOwner() {}
 
     // Construtor com parâmetros
-    public ShopOwner(String name, String shopName) {
-        this.name = name;
+    public ShopOwner(String shopName, int floor, User owner, List<Expense> expenses, List<Notification> notifications) {
         this.shopName = shopName;
+        this.floor = floor;
+        this.owner = owner;
+        this.expenses = expenses;
+        this.notifications = notifications;
     }
 
     // Getters e Setters
@@ -49,38 +54,6 @@ public class ShopOwner {
         this.id = id;
     }
 
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public String getPhoneNumber() {
-        return phoneNumber;
-    }
-
-    public void setPhoneNumber(String phoneNumber) {
-        this.phoneNumber = phoneNumber;
-    }
-
-    public String getEmail() {
-        return email;
-    }
-
-    public void setEmail(String email) {
-        this.email = email;
-    }
-
-    public Integer getShopNumber() {
-        return shopNumber;
-    }
-
-    public void setShopNumber(Integer shopNumber) {
-        this.shopNumber = shopNumber;
-    }
-
     public String getShopName() {
         return shopName;
     }
@@ -89,38 +62,67 @@ public class ShopOwner {
         this.shopName = shopName;
     }
 
-    // Método toString para facilitar a exibição dos dados do ShopOwner
+    public int getFloor() {
+        return floor;
+    }
+
+    public void setFloor(int floor) {
+        this.floor = floor;
+    }
+
+    public User getOwner() {
+        return owner;
+    }
+
+    public void setOwner(User owner) {
+        this.owner = owner;
+    }
+
+    public List<Expense> getExpenses() {
+        return expenses;
+    }
+
+    public void setExpenses(List<Expense> expenses) {
+        this.expenses = expenses;
+    }
+
+    public List<Notification> getNotifications() {
+        return notifications;
+    }
+
+    public void setNotifications(List<Notification> notifications) {
+        this.notifications = notifications;
+    }
+
+    // Métodos toString, equals e hashCode
     @Override
     public String toString() {
         return "ShopOwner{" +
                 "id='" + id + '\'' +
-                ", name='" + name + '\'' +
-                ", phoneNumber='" + phoneNumber + '\'' +
-                ", email='" + email + '\'' +
                 ", shopName='" + shopName + '\'' +
-                ", shopNumber='" + shopNumber + '\'' +
+                ", floor=" + floor +
+                ", owner=" + (owner != null ? owner.getUsername() : null) +
+                ", expenses=" + expenses +
+                ", notifications=" + notifications +
                 '}';
     }
 
-    // Override do método equals para comparação precisa entre objetos ShopOwner
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-
         ShopOwner shopOwner = (ShopOwner) o;
-
-        if (!id.equals(shopOwner.id)) return false;
-        if (!name.equals(shopOwner.name)) return false;
-        return shopName.equals(shopOwner.shopName);
+        return floor == shopOwner.floor &&
+               Objects.equals(id, shopOwner.id) &&
+               Objects.equals(shopName, shopOwner.shopName) &&
+               Objects.equals(owner, shopOwner.owner) &&
+               Objects.equals(expenses, shopOwner.expenses) &&
+               Objects.equals(notifications, shopOwner.notifications);
     }
 
-    // Override do método hashCode para uso eficiente em coleções
     @Override
     public int hashCode() {
-        int result = id.hashCode();
-        result = 31 * result + name.hashCode();
-        result = 31 * result + shopName.hashCode();
-        return result;
+        return Objects.hash(id, shopName, floor, owner, expenses, notifications);
     }
 }
+
