@@ -13,11 +13,18 @@ O objetivo principal do CondoGuard é fornecer uma ferramenta robusta e amigáve
 
 ## Funcionalidades
 
-- **Gerenciamento de Despesas**: Registre e acompanhe todas as despesas do condomínio em tempo real.
+- **Gerenciamento de Despesas**: Registre e acompanhe todas as despesas do condomínio por unidade (residencial ou comercial).
 - **Previsão de Gastos**: Use dados históricos para prever gastos futuros e planejar o orçamento.
 - **Notificações Inteligentes**: Receba alertas sobre possíveis problemas, como vazamentos ou aumentos inesperados de consumo.
 - **Autenticação Segura**: Sistema de login seguro utilizando JWT para proteger dados sensíveis.
 - **Sistema de Comunicação**: Integração para permitir uma comunicação eficaz entre síndicos e moradores.
+  
+## Tecnologias Utilizadas
+
+- **Backend**: Spring Boot
+- **Banco de Dados**: MongoDB
+- **Segurança**: Autenticação e autorização com JWT
+- **Linguagem de Programação**: Java
 
 ## Instalação e Configuração
 
@@ -57,13 +64,41 @@ O objetivo principal do CondoGuard é fornecer uma ferramenta robusta e amigáve
 
 - **GET** `/users`: Listar todos os usuários (requer autenticação).
 - **GET** `/users/{id}`: Obter detalhes de um usuário específico (requer autenticação).
+- **POST** `/users`: Criar um novo usuário.
+- **PUT** `/users/{id}`: Atualizar um usuário existente.
+- **DELETE** `/users/{id}`: Deletar um usuário.
+
+### Residências
+
+- **GET** `/residents`: Listar todas as residências.
+- **GET** `/residents/{id}`: Obter detalhes de uma residência específica.
+- **POST** `/residents`: Criar uma nova residência.
+- **PUT** `/residents/{id}`: Atualizar uma residência existente.
+- **DELETE** `/residents/{id}`: Deletar uma residência.
+
+### Lojas
+
+- **GET** `/shopOwners`: Listar todas as lojas.
+- **GET** `/shopOwners/{id}`: Obter detalhes de uma loja específica.
+- **POST** `/shopOwners`: Criar uma nova loja.
+- **PUT** `/shopOwners/{id}`: Atualizar uma loja existente.
+- **DELETE** `/shopOwners/{id}`: Deletar uma loja.
+
+### Notificações
+
+- **GET** `/notifications`: Listar todas as notificações.
+- **GET** `/notifications/{id}`: Obter detalhes de uma notificação específica.
+- **POST** `/notifications`: Criar uma nova notificação.
+- **PUT** `/notifications/{id}`: Atualizar uma notificação existente.
+- **DELETE** `/notifications/{id}`: Deletar uma notificação.
 
 ### Despesas
 
-- **GET** `/expenses`: Listar todas as despesas (requer autenticação).
-- **POST** `/expenses`: Criar uma nova despesa (requer autenticação).
-- **PUT** `/expenses/{id}`: Atualizar uma despesa existente (requer autenticação).
-- **DELETE** `/expenses/{id}`: Excluir uma despesa (requer autenticação).
+- **GET** `/expenses`: Listar todas as despesas.
+- **GET** `/expenses/{id}`: Obter detalhes de uma despesa específica.
+- **POST** `/expenses`: Criar uma nova despesa.
+- **PUT** `/expenses/{id}`: Atualizar uma despesa existente.
+- **DELETE** `/expenses/{id}`: Deletar uma despesa.
 
 ## Contribuição
 
