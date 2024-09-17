@@ -66,36 +66,37 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<Map<String, String>> login(@RequestBody AuthRequest authRequest) {
+    public ResponseEntity<Map<String, Object>> login(@RequestBody AuthRequest authRequest) {
         try {
             // O AuthenticationManager tenta autenticar as credenciais fornecidas
             authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(authRequest.getUsername(), authRequest.getPassword())
             );
-        } catch (UsernameNotFoundException e) {
-            // Captura exceções quando o usuário não é encontrado
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("error", "Incorrect username or password");
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorResponse);
-        } catch (BadCredentialsException e) {
-            // Captura exceções quando as credenciais estão incorretas
-            Map<String, String> errorResponse = new HashMap<>();
+        } catch (UsernameNotFoundException | BadCredentialsException e) {
+            // Captura exceções quando o usuário não é encontrado ou as credenciais estão incorretas
+            Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("error", "Incorrect username or password");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorResponse);
         } catch (AuthenticationException e) {
             // Captura todas as outras exceções de autenticação
-            Map<String, String> errorResponse = new HashMap<>();
+            Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("error", "Authentication failed");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorResponse);
         }
 
-        // Gera um token JWT após autenticação bem-sucedida
-        String token = jwtUtil.generateToken(authRequest.getUsername());
+        // Fetch the user from the repository
+        User user = userRepository.findByUsername(authRequest.getUsername());
+        if (user == null) {
+            throw new UsernameNotFoundException("User not found");
+        }
 
-        // Cria o corpo da resposta
-        Map<String, String> response = new HashMap<>();
+        // Generate JWT token
+        String token = jwtUtil.generateToken(user.getUsername());
+
+        // Create the response body
+        Map<String, Object> response = new HashMap<>();
         response.put("token", token);
-
+        response.put("roles", user.getRoles());
         return ResponseEntity.ok(response);
     }
 }
