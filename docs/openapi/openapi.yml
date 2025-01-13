@@ -1,0 +1,120 @@
+openapi: 3.0.0
+info:
+  title: CondoGuard API
+  version: 2.0.0
+  description: |
+    API for condominium management system with versioning support.
+    
+    ## Versioning
+    This API supports two versions:
+    - V1: Stable version with basic functionality
+    - V2: Beta version with advanced features
+    
+    ### Version Selection
+    You can specify the API version in two ways:
+    1. URL Path: `/api/v1/...` or `/api/v2/...`
+    2. Accept Header: `Accept: application/vnd.condoguard.v1+json`
+
+servers:
+  - url: https://api.condoguard.com/api/v1
+    description: V1 API Server
+  - url: https://api.condoguard.com/api/v2
+    description: V2 API Server (Beta)
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  
+  parameters:
+    ApiVersionHeader:
+      in: header
+      name: Accept
+      schema:
+        type: string
+        enum:
+          - application/vnd.condoguard.v1+json
+          - application/vnd.condoguard.v2+json
+      required: false
+      description: API version selection via Accept header
+
+paths:
+  /users:
+    get:
+      tags:
+        - Users
+      summary: Get all users
+      parameters:
+        - $ref: '#/components/parameters/ApiVersionHeader'
+      responses:
+        '200':
+          description: List of users
+          content:
+            application/vnd.condoguard.v1+json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserV1'
+            application/vnd.condoguard.v2+json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/UserV2'
+                  metadata:
+                    $ref: '#/components/schemas/MetadataV2'
+
+components:
+  schemas:
+    UserV1:
+      type: object
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        email:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+
+    UserV2:
+      type: object
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        email:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+        profile:
+          type: object
+          properties:
+            fullName:
+              type: string
+            phone:
+              type: string
+            preferences:
+              type: object
+              additionalProperties: true
+
+    MetadataV2:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        version:
+          type: string
+        requestId:
+          type: string

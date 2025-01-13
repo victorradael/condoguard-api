@@ -11,136 +11,185 @@ CondoGuard é um aplicativo em desenvolvimento que visa ajudar os condôminos a 
 
 O objetivo principal do CondoGuard é fornecer uma ferramenta robusta e amigável para a gestão financeira de condomínios, ajudando tanto os administradores quanto os moradores a terem uma visão clara de suas despesas, além de se prevenirem contra futuros problemas com base no histórico de gastos.
 
-## Funcionalidades
+### Principais Funcionalidades
 
-- **Gerenciamento de Despesas**: Registre e acompanhe todas as despesas do condomínio por unidade (residencial ou comercial).
-- **Previsão de Gastos**: Use dados históricos para prever gastos futuros e planejar o orçamento.
-- **Notificações Inteligentes**: Receba alertas sobre possíveis problemas, como vazamentos ou aumentos inesperados de consumo.
-- **Autenticação Segura**: Sistema de login seguro utilizando JWT para proteger dados sensíveis.
-- **Sistema de Comunicação**: Integração para permitir uma comunicação eficaz entre síndicos e moradores.
-  
-## Tecnologias Utilizadas
+- 🏢 Gestão de moradores e unidades
+- 💰 Controle de despesas
+- 📱 Sistema de notificações
+- 🔐 Autenticação e autorização
+- 📊 Monitoramento e métricas
+- 🔄 Versionamento de API
 
-- **Backend**: Spring Boot
-- **Banco de Dados**: MongoDB
-- **Segurança**: Autenticação e autorização com JWT
-- **Linguagem de Programação**: Java
+## 🚀 Tecnologias Utilizadas
 
-## Instalação e Configuração
+- Go 1.21+
+- MongoDB
+- Redis
+- Docker & Docker Compose
+- Prometheus & Grafana
+- Swagger/OpenAPI
+
+## 📦 Pré-requisitos
+
+- Go 1.21 ou superior
+- Docker e Docker Compose
+- Make (opcional, mas recomendado)
+
+## 🛠️ Configuração do Ambiente de Desenvolvimento
 
 1. Clone o repositório:
+```bash
+git clone https://github.com/seu-usuario/condoguard.git
+cd condoguard
+```
 
-    ```bash
-    git clone https://github.com/seu-usuario/condoguard.git
-    cd condoguard
-    ```
+2. Copie o arquivo de ambiente:
+```bash
+cp .env.example .env
+```
 
-2. Certifique-se de ter o MongoDB em execução localmente ou configure a URL de conexão no arquivo `application.properties`:
+3. Configure as variáveis de ambiente no arquivo `.env`:
+```env
+# API
+PORT=8080
+ENV=development
 
-    ```properties
-    spring.data.mongodb.uri=mongodb://localhost:27017/condoguard
-    ```
+# MongoDB
+MONGODB_URI=mongodb://localhost:27017/condoguard
+MONGODB_DATABASE=condoguard
 
-3. Configure o segredo JWT no arquivo `application.properties`:
+# Redis
+REDIS_ADDR=localhost:6379
+REDIS_PASSWORD=
 
-    ```properties
-    jwt.secret=SeuSegredoJWT
-    ```
+# JWT
+JWT_SECRET=seu_secret_aqui
+JWT_EXPIRATION=24h
 
-4. Execute o projeto:
+# Logging
+LOG_LEVEL=debug
+```
 
-    ```bash
-    mvn spring-boot:run
-    ```
+4. Inicie os serviços com Docker Compose:
+```bash
+docker-compose up -d
+```
 
-## Endpoints da API
+## 🚀 Executando o Projeto
 
-### Autenticação
+### Usando Make
 
-- **POST** `/auth/register`: Registrar um novo usuário.
-- **POST** `/auth/login`: Fazer login com credenciais e receber um token JWT.
+O projeto inclui um Makefile para facilitar as operações comuns:
 
-### Usuários
+```bash
+# Instalar dependências
+make deps
 
-- **GET** `/users`: Listar todos os usuários (requer autenticação).
-- **GET** `/users/{id}`: Obter detalhes de um usuário específico (requer autenticação).
-- **POST** `/users`: Criar um novo usuário.
-- **PUT** `/users/{id}`: Atualizar um usuário existente.
-- **DELETE** `/users/{id}`: Deletar um usuário.
+# Executar testes
+make test
 
-### Residências
+# Executar o projeto em modo desenvolvimento
+make run
 
-- **GET** `/residents`: Listar todas as residências.
-- **GET** `/residents/{id}`: Obter detalhes de uma residência específica.
-- **POST** `/residents`: Criar uma nova residência.
-- **PUT** `/residents/{id}`: Atualizar uma residência existente.
-- **DELETE** `/residents/{id}`: Deletar uma residência.
+# Gerar documentação Swagger
+make swagger
 
-### Lojas
+# Executar linter
+make lint
 
-- **GET** `/shopOwners`: Listar todas as lojas.
-- **GET** `/shopOwners/{id}`: Obter detalhes de uma loja específica.
-- **POST** `/shopOwners`: Criar uma nova loja.
-- **PUT** `/shopOwners/{id}`: Atualizar uma loja existente.
-- **DELETE** `/shopOwners/{id}`: Deletar uma loja.
+# Buildar o projeto
+make build
+```
 
-### Notificações
+### Manualmente
 
-- **GET** `/notifications`: Listar todas as notificações.
-- **GET** `/notifications/{id}`: Obter detalhes de uma notificação específica.
-- **POST** `/notifications`: Criar uma nova notificação.
-- **PUT** `/notifications/{id}`: Atualizar uma notificação existente.
-- **DELETE** `/notifications/{id}`: Deletar uma notificação.
+1. Instale as dependências:
+```bash
+go mod download
+```
 
-### Despesas
+2. Execute os testes:
+```bash
+go test ./...
+```
 
-- **GET** `/expenses`: Listar todas as despesas.
-- **GET** `/expenses/{id}`: Obter detalhes de uma despesa específica.
-- **POST** `/expenses`: Criar uma nova despesa.
-- **PUT** `/expenses/{id}`: Atualizar uma despesa existente.
-- **DELETE** `/expenses/{id}`: Deletar uma despesa.
+3. Inicie o servidor:
+```bash
+go run cmd/api/main.go
+```
 
-## Contribuição
+## 📚 Documentação da API
 
-Contribuições são bem-vindas! Se você deseja adicionar novas funcionalidades, corrigir bugs ou melhorar a documentação, siga os passos abaixo:
+A documentação da API está disponível através do Swagger UI após iniciar o servidor:
 
-1. Faça um fork do projeto.
-2. Crie uma nova branch para a sua feature:
+- Local: http://localhost:8080/swagger/index.html
 
-    ```bash
-    git checkout -b feature/nova-feature
-    ```
+## 🔍 Monitoramento
 
-3. Faça as alterações desejadas e commit:
+O projeto inclui monitoramento completo usando Prometheus e Grafana:
 
-    ```bash
-    git commit -m "Adicionar nova feature"
-    ```
+1. Acesse o Prometheus:
+- http://localhost:9090
 
-4. Envie suas alterações para o repositório:
+2. Acesse o Grafana:
+- http://localhost:3000
+- Login padrão: admin/admin
 
-    ```bash
-    git push origin feature/nova-feature
-    ```
+### Dashboards Disponíveis
 
-5. Abra um Pull Request explicando as mudanças propostas.
+- Circuit Breaker Status
+- Performance Metrics
+- API Usage
+- Health Checks
 
-## Futuras Melhorias
+## 🧪 Testes
 
-CondoGuard está em constante desenvolvimento. Algumas das funcionalidades planejadas para as próximas versões incluem:
+### Executando Testes
 
-- **Integração com Sistemas de Pagamento**: Permitir que os usuários paguem suas despesas diretamente pelo aplicativo.
-- **Dashboard Analítico**: Visualize dados financeiros e estatísticas de consumo.
-- **Integração com IoT**: Monitore consumo de energia, água e gás em tempo real.
+```bash
+# Testes unitários
+go test ./...
 
-## Licença
+# Testes com cobertura
+go test -cover ./...
 
-Este projeto é licenciado sob a [GNU General Public License v3.0](LICENSE).
+# Testes de carga (k6)
+k6 run tests/load/load_test.js
+```
 
-## Contato
+## 📁 Estrutura do Projeto
 
-Para mais informações ou sugestões, entre em contato conosco pelo e-mail: [radael.engenharia@gmail.com](mailto:seu-email@exemplo.com).
+```
+condoguard/
+├── cmd/                    # Pontos de entrada da aplicação
+├── internal/              # Código interno da aplicação
+│   ├── auth/             # Autenticação e autorização
+│   ├── handler/          # Handlers HTTP
+│   ├── middleware/       # Middlewares
+│   ├── model/           # Modelos de dados
+│   ├── repository/      # Camada de acesso a dados
+│   ├── service/         # Lógica de negócios
+│   └── validator/       # Validação de dados
+├── pkg/                 # Bibliotecas públicas
+├── scripts/            # Scripts úteis
+├── deployments/        # Configurações de deploy
+└── tests/             # Testes
+```
 
----
+## 🤝 Contribuindo
 
-**CondoGuard** - Simplificando a gestão do seu condomínio!
+1. Fork o projeto
+2. Crie sua Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
+4. Push para a Branch (`git push origin feature/AmazingFeature`)
+5. Abra um Pull Request
+
+## 📝 Licença
+
+Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
+
+## 📧 Contato
+
+Seu Nome - [@seutwitter](https://twitter.com/seutwitter) - seu.email@exemplo.com
+
+Link do Projeto: [https://github.com/seu-usuario/condoguard](https://github.com/seu-usuario/condoguard)
