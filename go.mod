@@ -13,10 +13,12 @@ require (
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.9.0
-	github.com/swaggo/swag v1.16.4
+	github.com/swaggo/swag v1.16.2
 	go.mongodb.org/mongo-driver v1.13.1
 	golang.org/x/crypto v0.24.0
 	golang.org/x/time v0.9.0
+	github.com/golangci/golangci-lint v1.55.2
+	github.com/golang/mock v1.6.0
 )
 
 require (

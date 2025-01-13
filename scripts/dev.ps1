@@ -15,8 +15,16 @@ function Show-Help {
     Write-Host "  monitor   - Inicia os serviços de monitoramento"
 }
 
+function Install-DevTools {
+    Write-Host "Instalando ferramentas de desenvolvimento..."
+    go install github.com/swaggo/swag/cmd/swag@latest
+    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+    go install github.com/golang/mock/mockgen@latest
+}
+
 function Install-Dependencies {
     Write-Host "Instalando dependências..."
+    Install-DevTools
     go mod download
     go mod tidy
 }

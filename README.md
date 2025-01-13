@@ -193,3 +193,31 @@ Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para ma
 Seu Nome - [@seutwitter](https://twitter.com/seutwitter) - seu.email@exemplo.com
 
 Link do Projeto: [https://github.com/seu-usuario/condoguard](https://github.com/seu-usuario/condoguard)
+
+## 🛠️ Ferramentas de Desenvolvimento
+
+O projeto utiliza as seguintes ferramentas de desenvolvimento:
+
+- [swag](https://github.com/swaggo/swag) - Geração automática de documentação Swagger
+- [golangci-lint](https://golangci-lint.run/) - Linter para Go
+- [mockgen](https://github.com/golang/mock) - Geração de mocks para testes
+
+Todas as ferramentas são instaladas automaticamente ao executar:
+```powershell
+.\scripts\dev.ps1 deps
+```
+
+### Instalação Manual das Ferramentas
+
+Se precisar instalar as ferramentas manualmente:
+
+```bash
+# Swagger
+go install github.com/swaggo/swag/cmd/swag@latest
+
+# Linter
+go install github.com/golangci/golint/cmd/golangci-lint@latest
+
+# Mock Generator
+go install github.com/golang/mock/mockgen@latest
+```
