@@ -1,15 +1,15 @@
 <div style="text-align: center;">
-    <img src="assets/condoguard-logo.svg" alt="CondoguardLogo" width="200" height="200">
+    <img src="../assets/condoguard-logo.png" alt="CondoguardLogo"  height="200">
 </div>
 
 
-# CondoGuard
+# API
 
-CondoGuard é um aplicativo em desenvolvimento que visa ajudar os condôminos a administrar suas despesas condominiais de forma eficiente e preventiva. Com uma abordagem inovadora, o CondoGuard permite que os usuários gerenciem suas despesas, façam previsões financeiras e identifiquem possíveis problemas antes que eles se tornem críticos.
+**CONDOGUARD API** é um aplicativo em desenvolvimento que visa ajudar os condôminos a administrar suas despesas condominiais de forma eficiente e preventiva. Com uma abordagem inovadora, o **CONDOGUARD API** permite que os usuários gerenciem suas despesas, façam previsões financeiras e identifiquem possíveis problemas antes que eles se tornem críticos.
 
 ## Objetivo
 
-O objetivo principal do CondoGuard é fornecer uma ferramenta robusta e amigável para a gestão financeira de condomínios, ajudando tanto os administradores quanto os moradores a terem uma visão clara de suas despesas, além de se prevenirem contra futuros problemas com base no histórico de gastos.
+O objetivo principal do **CONDOGUARD API** é fornecer uma ferramenta robusta e amigável para a gestão financeira de condomínios, ajudando tanto os administradores quanto os moradores a terem uma visão clara de suas despesas, além de se prevenirem contra futuros problemas com base no histórico de gastos.
 
 ## Funcionalidades
 
