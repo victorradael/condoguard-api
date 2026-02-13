@@ -17,79 +17,78 @@
 
 package com.radael.condoguard.service;
 
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-
 import com.radael.condoguard.model.Expense;
 import com.radael.condoguard.repository.ExpenseRepository;
 import com.radael.condoguard.repository.ResidentRepository;
 import com.radael.condoguard.repository.ShopOwnerRepository;
-
 import java.util.List;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
 
 @Service
 public class ExpenseService {
 
-    @Autowired
-    private ExpenseRepository expenseRepository;
+  @Autowired private ExpenseRepository expenseRepository;
 
-    @Autowired
-    private ResidentRepository residentRepository;
+  @Autowired private ResidentRepository residentRepository;
 
-    @Autowired
-    private ShopOwnerRepository shopOwnerRepository;
+  @Autowired private ShopOwnerRepository shopOwnerRepository;
 
-    public List<Expense> getAllExpenses() {
-        return expenseRepository.findAll();
+  public List<Expense> getAllExpenses() {
+    return expenseRepository.findAll();
+  }
+
+  public Optional<Expense> getExpenseById(String id) {
+    return expenseRepository.findById(id);
+  }
+
+  public Expense createExpense(Expense expense) {
+    // Verifica se o residente associado existe
+    if (expense.getResident() != null) {
+      residentRepository
+          .findById(expense.getResident().getId())
+          .orElseThrow(() -> new RuntimeException("Resident not found"));
     }
 
-    public Optional<Expense> getExpenseById(String id) {
-        return expenseRepository.findById(id);
+    // Verifica se o proprietário de loja associado existe
+    if (expense.getShopOwner() != null) {
+      shopOwnerRepository
+          .findById(expense.getShopOwner().getId())
+          .orElseThrow(() -> new RuntimeException("ShopOwner not found"));
     }
 
-    public Expense createExpense(Expense expense) {
-        // Verifica se o residente associado existe
-        if (expense.getResident() != null) {
-            residentRepository.findById(expense.getResident().getId())
-                    .orElseThrow(() -> new RuntimeException("Resident not found"));
-        }
+    return expenseRepository.save(expense);
+  }
 
-        // Verifica se o proprietário de loja associado existe
-        if (expense.getShopOwner() != null) {
-            shopOwnerRepository.findById(expense.getShopOwner().getId())
-                    .orElseThrow(() -> new RuntimeException("ShopOwner not found"));
-        }
+  public Expense updateExpense(String id, Expense expenseDetails) {
+    Expense expense =
+        expenseRepository.findById(id).orElseThrow(() -> new RuntimeException("Expense not found"));
 
-        return expenseRepository.save(expense);
+    expense.setDescription(expenseDetails.getDescription());
+    expense.setAmount(expenseDetails.getAmount());
+    expense.setDate(expenseDetails.getDate());
+
+    // Atualiza a referência para o residente, se aplicável
+    if (expenseDetails.getResident() != null) {
+      residentRepository
+          .findById(expenseDetails.getResident().getId())
+          .orElseThrow(() -> new RuntimeException("Resident not found"));
+      expense.setResident(expenseDetails.getResident());
     }
 
-    public Expense updateExpense(String id, Expense expenseDetails) {
-        Expense expense = expenseRepository.findById(id).orElseThrow(() -> new RuntimeException("Expense not found"));
-
-        expense.setDescription(expenseDetails.getDescription());
-        expense.setAmount(expenseDetails.getAmount());
-        expense.setDate(expenseDetails.getDate());
-
-        // Atualiza a referência para o residente, se aplicável
-        if (expenseDetails.getResident() != null) {
-            residentRepository.findById(expenseDetails.getResident().getId())
-                    .orElseThrow(() -> new RuntimeException("Resident not found"));
-            expense.setResident(expenseDetails.getResident());
-        }
-
-        // Atualiza a referência para o proprietário de loja, se aplicável
-        if (expenseDetails.getShopOwner() != null) {
-            shopOwnerRepository.findById(expenseDetails.getShopOwner().getId())
-                    .orElseThrow(() -> new RuntimeException("ShopOwner not found"));
-            expense.setShopOwner(expenseDetails.getShopOwner());
-        }
-
-        return expenseRepository.save(expense);
+    // Atualiza a referência para o proprietário de loja, se aplicável
+    if (expenseDetails.getShopOwner() != null) {
+      shopOwnerRepository
+          .findById(expenseDetails.getShopOwner().getId())
+          .orElseThrow(() -> new RuntimeException("ShopOwner not found"));
+      expense.setShopOwner(expenseDetails.getShopOwner());
     }
 
-    public void deleteExpense(String id) {
-        expenseRepository.deleteById(id);
-    }
+    return expenseRepository.save(expense);
+  }
+
+  public void deleteExpense(String id) {
+    expenseRepository.deleteById(id);
+  }
 }
-

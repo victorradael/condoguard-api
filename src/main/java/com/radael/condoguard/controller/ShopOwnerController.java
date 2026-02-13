@@ -17,47 +17,46 @@
 
 package com.radael.condoguard.controller;
 
+import com.radael.condoguard.model.ShopOwner;
+import com.radael.condoguard.service.ShopOwnerService;
+import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import com.radael.condoguard.model.ShopOwner;
-import com.radael.condoguard.service.ShopOwnerService;
-
-import java.util.List;
-
 @RestController
 @RequestMapping("/shopOwners")
 public class ShopOwnerController {
-    
-    @Autowired
-    private ShopOwnerService shopOwnerService;
 
-    @GetMapping
-    public List<ShopOwner> getAllShopOwners() {
-        return shopOwnerService.getAllShopOwners();
-    }
+  @Autowired private ShopOwnerService shopOwnerService;
 
-    @GetMapping("/{id}")
-    public ResponseEntity<ShopOwner> getShopOwnerById(@PathVariable String id) {
-        return shopOwnerService.getShopOwnerById(id)
-                .map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
-    }
+  @GetMapping
+  public List<ShopOwner> getAllShopOwners() {
+    return shopOwnerService.getAllShopOwners();
+  }
 
-    @PostMapping
-    public ShopOwner createShopOwner(@RequestBody ShopOwner shopOwner) {
-        return shopOwnerService.createShopOwner(shopOwner);
-    }
+  @GetMapping("/{id}")
+  public ResponseEntity<ShopOwner> getShopOwnerById(@PathVariable String id) {
+    return shopOwnerService
+        .getShopOwnerById(id)
+        .map(ResponseEntity::ok)
+        .orElse(ResponseEntity.notFound().build());
+  }
 
-    @PutMapping("/{id}")
-    public ResponseEntity<ShopOwner> updateShopOwner(@PathVariable String id, @RequestBody ShopOwner shopOwnerDetails) {
-        return ResponseEntity.ok(shopOwnerService.updateShopOwner(id, shopOwnerDetails));
-    }
+  @PostMapping
+  public ShopOwner createShopOwner(@RequestBody ShopOwner shopOwner) {
+    return shopOwnerService.createShopOwner(shopOwner);
+  }
 
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteShopOwner(@PathVariable String id) {
-        shopOwnerService.deleteShopOwner(id);
-        return ResponseEntity.noContent().build();
-    }
+  @PutMapping("/{id}")
+  public ResponseEntity<ShopOwner> updateShopOwner(
+      @PathVariable String id, @RequestBody ShopOwner shopOwnerDetails) {
+    return ResponseEntity.ok(shopOwnerService.updateShopOwner(id, shopOwnerDetails));
+  }
+
+  @DeleteMapping("/{id}")
+  public ResponseEntity<Void> deleteShopOwner(@PathVariable String id) {
+    shopOwnerService.deleteShopOwner(id);
+    return ResponseEntity.noContent().build();
+  }
 }

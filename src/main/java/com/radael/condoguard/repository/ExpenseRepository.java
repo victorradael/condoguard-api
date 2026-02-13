@@ -15,12 +15,11 @@
  * along with CondoGuard. If not, see <https://www.gnu.org/licenses/>.
  */
 
- package com.radael.condoguard.repository;
+package com.radael.condoguard.repository;
 
- import org.springframework.data.mongodb.repository.MongoRepository;
- 
- import com.radael.condoguard.model.Expense;
- 
- public interface ExpenseRepository extends MongoRepository<Expense, String> {
-     // Métodos de consulta personalizados, se necessário
- }
+import com.radael.condoguard.model.Expense;
+import org.springframework.data.mongodb.repository.MongoRepository;
+
+public interface ExpenseRepository extends MongoRepository<Expense, String> {
+  // Métodos de consulta personalizados, se necessário
+}

@@ -17,112 +17,122 @@
 
 package com.radael.condoguard.model;
 
+import java.util.List;
+import java.util.Objects;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
-import java.util.List;
-import java.util.Objects;
-
 @Document(collection = "shopOwners")
 public class ShopOwner {
-    @Id
-    private String id;
-    private String shopName; // Nome da loja
-    private int floor; // Andar onde a loja está localizada
-    private User owner; // Associação com o proprietário (usuário)
-    private List<Expense> expenses; // Lista de despesas associadas
-    private List<Notification> notifications; // Lista de notificações associadas
+  @Id private String id;
+  private String shopName; // Nome da loja
+  private int floor; // Andar onde a loja está localizada
+  private User owner; // Associação com o proprietário (usuário)
+  private List<Expense> expenses; // Lista de despesas associadas
+  private List<Notification> notifications; // Lista de notificações associadas
 
-    // Construtor padrão
-    public ShopOwner() {}
+  // Construtor padrão
+  public ShopOwner() {}
 
-    // Construtor com parâmetros
-    public ShopOwner(String shopName, int floor, User owner, List<Expense> expenses, List<Notification> notifications) {
-        this.shopName = shopName;
-        this.floor = floor;
-        this.owner = owner;
-        this.expenses = expenses;
-        this.notifications = notifications;
-    }
+  // Construtor com parâmetros
+  public ShopOwner(
+      String shopName,
+      int floor,
+      User owner,
+      List<Expense> expenses,
+      List<Notification> notifications) {
+    this.shopName = shopName;
+    this.floor = floor;
+    this.owner = owner;
+    this.expenses = expenses;
+    this.notifications = notifications;
+  }
 
-    // Getters e Setters
-    public String getId() {
-        return id;
-    }
+  // Getters e Setters
+  public String getId() {
+    return id;
+  }
 
-    public void setId(String id) {
-        this.id = id;
-    }
+  public void setId(String id) {
+    this.id = id;
+  }
 
-    public String getShopName() {
-        return shopName;
-    }
+  public String getShopName() {
+    return shopName;
+  }
 
-    public void setShopName(String shopName) {
-        this.shopName = shopName;
-    }
+  public void setShopName(String shopName) {
+    this.shopName = shopName;
+  }
 
-    public int getFloor() {
-        return floor;
-    }
+  public int getFloor() {
+    return floor;
+  }
 
-    public void setFloor(int floor) {
-        this.floor = floor;
-    }
+  public void setFloor(int floor) {
+    this.floor = floor;
+  }
 
-    public User getOwner() {
-        return owner;
-    }
+  public User getOwner() {
+    return owner;
+  }
 
-    public void setOwner(User owner) {
-        this.owner = owner;
-    }
+  public void setOwner(User owner) {
+    this.owner = owner;
+  }
 
-    public List<Expense> getExpenses() {
-        return expenses;
-    }
+  public List<Expense> getExpenses() {
+    return expenses;
+  }
 
-    public void setExpenses(List<Expense> expenses) {
-        this.expenses = expenses;
-    }
+  public void setExpenses(List<Expense> expenses) {
+    this.expenses = expenses;
+  }
 
-    public List<Notification> getNotifications() {
-        return notifications;
-    }
+  public List<Notification> getNotifications() {
+    return notifications;
+  }
 
-    public void setNotifications(List<Notification> notifications) {
-        this.notifications = notifications;
-    }
+  public void setNotifications(List<Notification> notifications) {
+    this.notifications = notifications;
+  }
 
-    // Métodos toString, equals e hashCode
-    @Override
-    public String toString() {
-        return "ShopOwner{" +
-                "id='" + id + '\'' +
-                ", shopName='" + shopName + '\'' +
-                ", floor=" + floor +
-                ", owner=" + (owner != null ? owner.getUsername() : null) +
-                ", expenses=" + expenses +
-                ", notifications=" + notifications +
-                '}';
-    }
+  // Métodos toString, equals e hashCode
+  @Override
+  public String toString() {
+    return "ShopOwner{"
+        + "id='"
+        + id
+        + '\''
+        + ", shopName='"
+        + shopName
+        + '\''
+        + ", floor="
+        + floor
+        + ", owner="
+        + (owner != null ? owner.getUsername() : null)
+        + ", expenses="
+        + expenses
+        + ", notifications="
+        + notifications
+        + '}';
+  }
 
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        ShopOwner shopOwner = (ShopOwner) o;
-        return floor == shopOwner.floor &&
-               Objects.equals(id, shopOwner.id) &&
-               Objects.equals(shopName, shopOwner.shopName) &&
-               Objects.equals(owner, shopOwner.owner) &&
-               Objects.equals(expenses, shopOwner.expenses) &&
-               Objects.equals(notifications, shopOwner.notifications);
-    }
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+    ShopOwner shopOwner = (ShopOwner) o;
+    return floor == shopOwner.floor
+        && Objects.equals(id, shopOwner.id)
+        && Objects.equals(shopName, shopOwner.shopName)
+        && Objects.equals(owner, shopOwner.owner)
+        && Objects.equals(expenses, shopOwner.expenses)
+        && Objects.equals(notifications, shopOwner.notifications);
+  }
 
-    @Override
-    public int hashCode() {
-        return Objects.hash(id, shopName, floor, owner, expenses, notifications);
-    }
+  @Override
+  public int hashCode() {
+    return Objects.hash(id, shopName, floor, owner, expenses, notifications);
+  }
 }
-

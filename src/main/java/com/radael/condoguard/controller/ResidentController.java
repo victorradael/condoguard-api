@@ -17,47 +17,46 @@
 
 package com.radael.condoguard.controller;
 
+import com.radael.condoguard.model.Resident;
+import com.radael.condoguard.service.ResidentService;
+import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import com.radael.condoguard.model.Resident;
-import com.radael.condoguard.service.ResidentService;
-
-import java.util.List;
 
 @RestController
 @RequestMapping("/residents")
 public class ResidentController {
 
-    @Autowired
-    private ResidentService residentService;
+  @Autowired private ResidentService residentService;
 
-    @GetMapping
-    public List<Resident> getAllResidents() {
-        return residentService.getAllResidents();
-    }
+  @GetMapping
+  public List<Resident> getAllResidents() {
+    return residentService.getAllResidents();
+  }
 
-    @GetMapping("/{id}")
-    public ResponseEntity<Resident> getResidentById(@PathVariable String id) {
-        return residentService.getResidentById(id)
-                .map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
-    }
+  @GetMapping("/{id}")
+  public ResponseEntity<Resident> getResidentById(@PathVariable String id) {
+    return residentService
+        .getResidentById(id)
+        .map(ResponseEntity::ok)
+        .orElse(ResponseEntity.notFound().build());
+  }
 
-    @PostMapping
-    public Resident createResident(@RequestBody Resident resident) {
-        return residentService.createResident(resident);
-    }
+  @PostMapping
+  public Resident createResident(@RequestBody Resident resident) {
+    return residentService.createResident(resident);
+  }
 
-    @PutMapping("/{id}")
-    public ResponseEntity<Resident> updateResident(@PathVariable String id, @RequestBody Resident residentDetails) {
-        return ResponseEntity.ok(residentService.updateResident(id, residentDetails));
-    }
+  @PutMapping("/{id}")
+  public ResponseEntity<Resident> updateResident(
+      @PathVariable String id, @RequestBody Resident residentDetails) {
+    return ResponseEntity.ok(residentService.updateResident(id, residentDetails));
+  }
 
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteResident(@PathVariable String id) {
-        residentService.deleteResident(id);
-        return ResponseEntity.noContent().build();
-    }
+  @DeleteMapping("/{id}")
+  public ResponseEntity<Void> deleteResident(@PathVariable String id) {
+    residentService.deleteResident(id);
+    return ResponseEntity.noContent().build();
+  }
 }

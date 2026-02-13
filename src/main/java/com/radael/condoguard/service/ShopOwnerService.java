@@ -17,42 +17,42 @@
 
 package com.radael.condoguard.service;
 
+import com.radael.condoguard.model.ShopOwner;
+import com.radael.condoguard.repository.ShopOwnerRepository;
+import java.util.List;
+import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import com.radael.condoguard.model.ShopOwner;
-import com.radael.condoguard.repository.ShopOwnerRepository;
-
-import java.util.List;
-import java.util.Optional;
-
 @Service
 public class ShopOwnerService {
-    
-    @Autowired
-    private ShopOwnerRepository shopOwnerRepository;
 
-    public List<ShopOwner> getAllShopOwners() {
-        return shopOwnerRepository.findAll();
-    }
+  @Autowired private ShopOwnerRepository shopOwnerRepository;
 
-    public Optional<ShopOwner> getShopOwnerById(String id) {
-        return shopOwnerRepository.findById(id);
-    }
+  public List<ShopOwner> getAllShopOwners() {
+    return shopOwnerRepository.findAll();
+  }
 
-    public ShopOwner createShopOwner(ShopOwner shopOwner) {
-        return shopOwnerRepository.save(shopOwner);
-    }
+  public Optional<ShopOwner> getShopOwnerById(String id) {
+    return shopOwnerRepository.findById(id);
+  }
 
-    public ShopOwner updateShopOwner(String id, ShopOwner shopOwnerDetails) {
-        ShopOwner shopOwner = shopOwnerRepository.findById(id).orElseThrow(() -> new RuntimeException("ShopOwner not found"));
-        shopOwner.setShopName(shopOwnerDetails.getShopName());
-        shopOwner.setFloor(shopOwnerDetails.getFloor());
-        // Atualize outros campos conforme necessário
-        return shopOwnerRepository.save(shopOwner);
-    }
+  public ShopOwner createShopOwner(ShopOwner shopOwner) {
+    return shopOwnerRepository.save(shopOwner);
+  }
 
-    public void deleteShopOwner(String id) {
-        shopOwnerRepository.deleteById(id);
-    }
+  public ShopOwner updateShopOwner(String id, ShopOwner shopOwnerDetails) {
+    ShopOwner shopOwner =
+        shopOwnerRepository
+            .findById(id)
+            .orElseThrow(() -> new RuntimeException("ShopOwner not found"));
+    shopOwner.setShopName(shopOwnerDetails.getShopName());
+    shopOwner.setFloor(shopOwnerDetails.getFloor());
+    // Atualize outros campos conforme necessário
+    return shopOwnerRepository.save(shopOwner);
+  }
+
+  public void deleteShopOwner(String id) {
+    shopOwnerRepository.deleteById(id);
+  }
 }

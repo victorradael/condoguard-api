@@ -17,111 +17,121 @@
 
 package com.radael.condoguard.model;
 
+import java.util.Date;
+import java.util.Objects;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
-import java.util.Date;
-import java.util.Objects;
-
 @Document(collection = "expenses")
 public class Expense {
-    @Id
-    private String id;
-    private String description;
-    private double amount;
-    private Date date;
-    private Resident resident; // Associação opcional com uma residência
-    private ShopOwner shopOwner; // Associação opcional com uma loja
+  @Id private String id;
+  private String description;
+  private double amount;
+  private Date date;
+  private Resident resident; // Associação opcional com uma residência
+  private ShopOwner shopOwner; // Associação opcional com uma loja
 
-    // Construtor padrão
-    public Expense() {}
+  // Construtor padrão
+  public Expense() {}
 
-    // Construtor com parâmetros
-    public Expense(String description, double amount, Date date, Resident resident, ShopOwner shopOwner) {
-        this.description = description;
-        this.amount = amount;
-        this.date = (date != null) ? new Date(date.getTime()) : null; // Cópia defensiva para evitar mutabilidade
-        this.resident = resident;
-        this.shopOwner = shopOwner;
-    }
+  // Construtor com parâmetros
+  public Expense(
+      String description, double amount, Date date, Resident resident, ShopOwner shopOwner) {
+    this.description = description;
+    this.amount = amount;
+    this.date =
+        (date != null)
+            ? new Date(date.getTime())
+            : null; // Cópia defensiva para evitar mutabilidade
+    this.resident = resident;
+    this.shopOwner = shopOwner;
+  }
 
-    // Getters e Setters
-    public String getId() {
-        return id;
-    }
+  // Getters e Setters
+  public String getId() {
+    return id;
+  }
 
-    public void setId(String id) {
-        this.id = id;
-    }
+  public void setId(String id) {
+    this.id = id;
+  }
 
-    public String getDescription() {
-        return description;
-    }
+  public String getDescription() {
+    return description;
+  }
 
-    public void setDescription(String description) {
-        this.description = description;
-    }
+  public void setDescription(String description) {
+    this.description = description;
+  }
 
-    public double getAmount() {
-        return amount;
-    }
+  public double getAmount() {
+    return amount;
+  }
 
-    public void setAmount(double amount) {
-        this.amount = amount;
-    }
+  public void setAmount(double amount) {
+    this.amount = amount;
+  }
 
-    public Date getDate() {
-        return (date != null) ? new Date(date.getTime()) : null; // Retorna uma cópia defensiva
-    }
+  public Date getDate() {
+    return (date != null) ? new Date(date.getTime()) : null; // Retorna uma cópia defensiva
+  }
 
-    public void setDate(Date date) {
-        this.date = (date != null) ? new Date(date.getTime()) : null;
-    }
+  public void setDate(Date date) {
+    this.date = (date != null) ? new Date(date.getTime()) : null;
+  }
 
-    public Resident getResident() {
-        return resident;
-    }
+  public Resident getResident() {
+    return resident;
+  }
 
-    public void setResident(Resident resident) {
-        this.resident = resident;
-    }
+  public void setResident(Resident resident) {
+    this.resident = resident;
+  }
 
-    public ShopOwner getShopOwner() {
-        return shopOwner;
-    }
+  public ShopOwner getShopOwner() {
+    return shopOwner;
+  }
 
-    public void setShopOwner(ShopOwner shopOwner) {
-        this.shopOwner = shopOwner;
-    }
+  public void setShopOwner(ShopOwner shopOwner) {
+    this.shopOwner = shopOwner;
+  }
 
-    // Métodos toString, equals e hashCode
-    @Override
-    public String toString() {
-        return "Expense{" +
-                "id='" + id + '\'' +
-                ", description='" + description + '\'' +
-                ", amount=" + amount +
-                ", date=" + date +
-                ", resident=" + (resident != null ? resident.getId() : null) +
-                ", shopOwner=" + (shopOwner != null ? shopOwner.getId() : null) +
-                '}';
-    }
+  // Métodos toString, equals e hashCode
+  @Override
+  public String toString() {
+    return "Expense{"
+        + "id='"
+        + id
+        + '\''
+        + ", description='"
+        + description
+        + '\''
+        + ", amount="
+        + amount
+        + ", date="
+        + date
+        + ", resident="
+        + (resident != null ? resident.getId() : null)
+        + ", shopOwner="
+        + (shopOwner != null ? shopOwner.getId() : null)
+        + '}';
+  }
 
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        Expense expense = (Expense) o;
-        return Double.compare(expense.amount, amount) == 0 &&
-               Objects.equals(id, expense.id) &&
-               Objects.equals(description, expense.description) &&
-               Objects.equals(date, expense.date) &&
-               Objects.equals(resident, expense.resident) &&
-               Objects.equals(shopOwner, expense.shopOwner);
-    }
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+    Expense expense = (Expense) o;
+    return Double.compare(expense.amount, amount) == 0
+        && Objects.equals(id, expense.id)
+        && Objects.equals(description, expense.description)
+        && Objects.equals(date, expense.date)
+        && Objects.equals(resident, expense.resident)
+        && Objects.equals(shopOwner, expense.shopOwner);
+  }
 
-    @Override
-    public int hashCode() {
-        return Objects.hash(id, description, amount, date, resident, shopOwner);
-    }
+  @Override
+  public int hashCode() {
+    return Objects.hash(id, description, amount, date, resident, shopOwner);
+  }
 }

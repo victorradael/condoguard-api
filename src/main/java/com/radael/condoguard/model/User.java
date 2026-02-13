@@ -17,124 +17,136 @@
 
 package com.radael.condoguard.model;
 
-import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.mapping.Document;
-
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.mapping.Document;
 
 @Document(collection = "users")
 public class User {
-    @Id
-    private String id;
-    private String username;
-    private String password; // Armazenar hash da senha
-    private String email;
-    private Set<String> roles = new HashSet<>(); // Ex: ["ROLE_USER", "ROLE_ADMIN"]
-    private List<Resident> residents; // Associação com residências
-    private List<ShopOwner> shopOwners; // Associação com lojas
+  @Id private String id;
+  private String username;
+  private String password; // Armazenar hash da senha
+  private String email;
+  private Set<String> roles = new HashSet<>(); // Ex: ["ROLE_USER", "ROLE_ADMIN"]
+  private List<Resident> residents; // Associação com residências
+  private List<ShopOwner> shopOwners; // Associação com lojas
 
-    // Construtor padrão
-    public User() {}
+  // Construtor padrão
+  public User() {}
 
-    // Construtor com parâmetros
-    public User(String username, String password, String email, Set<String> roles,
-                List<Resident> residents, List<ShopOwner> shopOwners) {
-        this.username = username;
-        this.setPassword(password); // Usa o setter para garantir o hash
-        this.email = email;
-        this.roles = roles != null ? new HashSet<>(roles) : new HashSet<>();
-        this.residents = residents;
-        this.shopOwners = shopOwners;
-    }
+  // Construtor com parâmetros
+  public User(
+      String username,
+      String password,
+      String email,
+      Set<String> roles,
+      List<Resident> residents,
+      List<ShopOwner> shopOwners) {
+    this.username = username;
+    this.setPassword(password); // Usa o setter para garantir o hash
+    this.email = email;
+    this.roles = roles != null ? new HashSet<>(roles) : new HashSet<>();
+    this.residents = residents;
+    this.shopOwners = shopOwners;
+  }
 
-    // Getters e Setters
-    public String getId() {
-        return id;
-    }
+  // Getters e Setters
+  public String getId() {
+    return id;
+  }
 
-    public void setId(String id) {
-        this.id = id;
-    }
+  public void setId(String id) {
+    this.id = id;
+  }
 
-    public String getUsername() {
-        return username;
-    }
+  public String getUsername() {
+    return username;
+  }
 
-    public void setUsername(String username) {
-        this.username = username;
-    }
+  public void setUsername(String username) {
+    this.username = username;
+  }
 
-    public String getPassword() {
-        return password;
-    }
+  public String getPassword() {
+    return password;
+  }
 
-    public void setPassword(String password) {
-        this.password = password;
-    }
+  public void setPassword(String password) {
+    this.password = password;
+  }
 
-    public String getEmail() {
-        return email;
-    }
+  public String getEmail() {
+    return email;
+  }
 
-    public void setEmail(String email) {
-        this.email = email;
-    }
+  public void setEmail(String email) {
+    this.email = email;
+  }
 
-    public Set<String> getRoles() {
-        return new HashSet<>(roles); // Retorna uma cópia defensiva
-    }
+  public Set<String> getRoles() {
+    return new HashSet<>(roles); // Retorna uma cópia defensiva
+  }
 
-    public void setRoles(Set<String> roles) {
-        this.roles = roles != null ? new HashSet<>(roles) : new HashSet<>();
-    }
+  public void setRoles(Set<String> roles) {
+    this.roles = roles != null ? new HashSet<>(roles) : new HashSet<>();
+  }
 
-    public List<Resident> getResidents() {
-        return residents;
-    }
+  public List<Resident> getResidents() {
+    return residents;
+  }
 
-    public void setResidents(List<Resident> residents) {
-        this.residents = residents;
-    }
+  public void setResidents(List<Resident> residents) {
+    this.residents = residents;
+  }
 
-    public List<ShopOwner> getShopOwners() {
-        return shopOwners;
-    }
+  public List<ShopOwner> getShopOwners() {
+    return shopOwners;
+  }
 
-    public void setShopOwners(List<ShopOwner> shopOwners) {
-        this.shopOwners = shopOwners;
-    }
+  public void setShopOwners(List<ShopOwner> shopOwners) {
+    this.shopOwners = shopOwners;
+  }
 
-    // Métodos toString, equals e hashCode
-    @Override
-    public String toString() {
-        return "User{" +
-                "id='" + id + '\'' +
-                ", username='" + username + '\'' +
-                ", email='" + email + '\'' +
-                ", roles=" + roles +
-                ", residents=" + residents +
-                ", shopOwners=" + shopOwners +
-                '}';
-    }
+  // Métodos toString, equals e hashCode
+  @Override
+  public String toString() {
+    return "User{"
+        + "id='"
+        + id
+        + '\''
+        + ", username='"
+        + username
+        + '\''
+        + ", email='"
+        + email
+        + '\''
+        + ", roles="
+        + roles
+        + ", residents="
+        + residents
+        + ", shopOwners="
+        + shopOwners
+        + '}';
+  }
 
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        User user = (User) o;
-        return Objects.equals(id, user.id) &&
-               Objects.equals(username, user.username) &&
-               Objects.equals(email, user.email) &&
-               Objects.equals(roles, user.roles) &&
-               Objects.equals(residents, user.residents) &&
-               Objects.equals(shopOwners, user.shopOwners);
-    }
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+    User user = (User) o;
+    return Objects.equals(id, user.id)
+        && Objects.equals(username, user.username)
+        && Objects.equals(email, user.email)
+        && Objects.equals(roles, user.roles)
+        && Objects.equals(residents, user.residents)
+        && Objects.equals(shopOwners, user.shopOwners);
+  }
 
-    @Override
-    public int hashCode() {
-        return Objects.hash(id, username, email, roles, residents, shopOwners);
-    }
+  @Override
+  public int hashCode() {
+    return Objects.hash(id, username, email, roles, residents, shopOwners);
+  }
 }

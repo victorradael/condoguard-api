@@ -17,44 +17,42 @@
 
 package com.radael.condoguard.service;
 
+import com.radael.condoguard.model.Resident;
+import com.radael.condoguard.repository.ResidentRepository;
+import java.util.List;
+import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import com.radael.condoguard.model.Resident;
-import com.radael.condoguard.repository.ResidentRepository;
-
-import java.util.List;
-import java.util.Optional;
-
 @Service
 public class ResidentService {
-    
-    @Autowired
-    private ResidentRepository residentRepository;
 
-    public List<Resident> getAllResidents() {
-        return residentRepository.findAll();
-    }
+  @Autowired private ResidentRepository residentRepository;
 
-    public Optional<Resident> getResidentById(String id) {
-        return residentRepository.findById(id);
-    }
+  public List<Resident> getAllResidents() {
+    return residentRepository.findAll();
+  }
 
-    public Resident createResident(Resident resident) {
-        return residentRepository.save(resident);
-    }
+  public Optional<Resident> getResidentById(String id) {
+    return residentRepository.findById(id);
+  }
 
-    public Resident updateResident(String id, Resident residentDetails) {
-        Resident resident = residentRepository.findById(id).orElseThrow(() -> new RuntimeException("Resident not found"));
-        resident.setUnitNumber(residentDetails.getUnitNumber());
-        resident.setFloor(residentDetails.getFloor());
-        // Atualize outros campos conforme necessário
-        return residentRepository.save(resident);
-    }
+  public Resident createResident(Resident resident) {
+    return residentRepository.save(resident);
+  }
 
-    public void deleteResident(String id) {
-        residentRepository.deleteById(id);
-    }
+  public Resident updateResident(String id, Resident residentDetails) {
+    Resident resident =
+        residentRepository
+            .findById(id)
+            .orElseThrow(() -> new RuntimeException("Resident not found"));
+    resident.setUnitNumber(residentDetails.getUnitNumber());
+    resident.setFloor(residentDetails.getFloor());
+    // Atualize outros campos conforme necessário
+    return residentRepository.save(resident);
+  }
+
+  public void deleteResident(String id) {
+    residentRepository.deleteById(id);
+  }
 }
-
-

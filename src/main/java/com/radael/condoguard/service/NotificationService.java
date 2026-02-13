@@ -17,70 +17,80 @@
 
 package com.radael.condoguard.service;
 
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-
 import com.radael.condoguard.model.Notification;
 import com.radael.condoguard.repository.NotificationRepository;
 import com.radael.condoguard.repository.ResidentRepository;
 import com.radael.condoguard.repository.ShopOwnerRepository;
-
 import java.util.List;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
 
 @Service
 public class NotificationService {
 
-    @Autowired
-    private NotificationRepository notificationRepository;
+  @Autowired private NotificationRepository notificationRepository;
 
-    @Autowired
-    private ResidentRepository residentRepository;
+  @Autowired private ResidentRepository residentRepository;
 
-    @Autowired
-    private ShopOwnerRepository shopOwnerRepository;
+  @Autowired private ShopOwnerRepository shopOwnerRepository;
 
-    public List<Notification> getAllNotifications() {
-        return notificationRepository.findAll();
+  public List<Notification> getAllNotifications() {
+    return notificationRepository.findAll();
+  }
+
+  public Optional<Notification> getNotificationById(String id) {
+    return notificationRepository.findById(id);
+  }
+
+  public Notification createNotification(Notification notification) {
+    // Verifica se os residentes associados existem
+    if (notification.getResidents() != null) {
+      notification.setResidents(
+          residentRepository.findAllById(
+              notification.getResidents().stream().map(resident -> resident.getId()).toList()));
     }
 
-    public Optional<Notification> getNotificationById(String id) {
-        return notificationRepository.findById(id);
+    // Verifica se os proprietários de loja associados existem
+    if (notification.getShopOwners() != null) {
+      notification.setShopOwners(
+          shopOwnerRepository.findAllById(
+              notification.getShopOwners().stream().map(shopOwner -> shopOwner.getId()).toList()));
     }
 
-    public Notification createNotification(Notification notification) {
-        // Verifica se os residentes associados existem
-        if (notification.getResidents() != null) {
-            notification.setResidents(residentRepository.findAllById(notification.getResidents().stream().map(resident -> resident.getId()).toList()));
-        }
+    return notificationRepository.save(notification);
+  }
 
-        // Verifica se os proprietários de loja associados existem
-        if (notification.getShopOwners() != null) {
-            notification.setShopOwners(shopOwnerRepository.findAllById(notification.getShopOwners().stream().map(shopOwner -> shopOwner.getId()).toList()));
-        }
+  public Notification updateNotification(String id, Notification notificationDetails) {
+    Notification notification =
+        notificationRepository
+            .findById(id)
+            .orElseThrow(() -> new RuntimeException("Notification not found"));
+    notification.setMessage(notificationDetails.getMessage());
+    notification.setCreatedBy(notificationDetails.getCreatedBy());
 
-        return notificationRepository.save(notification);
+    // Atualiza a lista de residentes associados
+    if (notificationDetails.getResidents() != null) {
+      notification.setResidents(
+          residentRepository.findAllById(
+              notificationDetails.getResidents().stream()
+                  .map(resident -> resident.getId())
+                  .toList()));
     }
 
-    public Notification updateNotification(String id, Notification notificationDetails) {
-        Notification notification = notificationRepository.findById(id).orElseThrow(() -> new RuntimeException("Notification not found"));
-        notification.setMessage(notificationDetails.getMessage());
-        notification.setCreatedBy(notificationDetails.getCreatedBy());
-        
-        // Atualiza a lista de residentes associados
-        if (notificationDetails.getResidents() != null) {
-            notification.setResidents(residentRepository.findAllById(notificationDetails.getResidents().stream().map(resident -> resident.getId()).toList()));
-        }
-
-        // Atualiza a lista de proprietários de loja associados
-        if (notificationDetails.getShopOwners() != null) {
-            notification.setShopOwners(shopOwnerRepository.findAllById(notificationDetails.getShopOwners().stream().map(shopOwner -> shopOwner.getId()).toList()));
-        }
-
-        return notificationRepository.save(notification);
+    // Atualiza a lista de proprietários de loja associados
+    if (notificationDetails.getShopOwners() != null) {
+      notification.setShopOwners(
+          shopOwnerRepository.findAllById(
+              notificationDetails.getShopOwners().stream()
+                  .map(shopOwner -> shopOwner.getId())
+                  .toList()));
     }
 
-    public void deleteNotification(String id) {
-        notificationRepository.deleteById(id);
-    }
+    return notificationRepository.save(notification);
+  }
+
+  public void deleteNotification(String id) {
+    notificationRepository.deleteById(id);
+  }
 }

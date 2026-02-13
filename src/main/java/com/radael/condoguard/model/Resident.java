@@ -17,111 +17,122 @@
 
 package com.radael.condoguard.model;
 
+import java.util.List;
+import java.util.Objects;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
-import java.util.List;
-import java.util.Objects;
-
 @Document(collection = "residents")
 public class Resident {
-    @Id
-    private String id;
-    private String unitNumber; // Número da unidade
-    private int floor; // Andar
-    private User owner; // Associação com o proprietário
-    private List<Expense> expenses; // Lista de despesas associadas
-    private List<Notification> notifications; // Lista de notificações associadas
+  @Id private String id;
+  private String unitNumber; // Número da unidade
+  private int floor; // Andar
+  private User owner; // Associação com o proprietário
+  private List<Expense> expenses; // Lista de despesas associadas
+  private List<Notification> notifications; // Lista de notificações associadas
 
-    // Construtor padrão
-    public Resident() {}
+  // Construtor padrão
+  public Resident() {}
 
-    // Construtor com parâmetros
-    public Resident(String unitNumber, int floor, User owner, List<Expense> expenses, List<Notification> notifications) {
-        this.unitNumber = unitNumber;
-        this.floor = floor;
-        this.owner = owner;
-        this.expenses = expenses;
-        this.notifications = notifications;
-    }
+  // Construtor com parâmetros
+  public Resident(
+      String unitNumber,
+      int floor,
+      User owner,
+      List<Expense> expenses,
+      List<Notification> notifications) {
+    this.unitNumber = unitNumber;
+    this.floor = floor;
+    this.owner = owner;
+    this.expenses = expenses;
+    this.notifications = notifications;
+  }
 
-    // Getters e Setters
-    public String getId() {
-        return id;
-    }
+  // Getters e Setters
+  public String getId() {
+    return id;
+  }
 
-    public void setId(String id) {
-        this.id = id;
-    }
+  public void setId(String id) {
+    this.id = id;
+  }
 
-    public String getUnitNumber() {
-        return unitNumber;
-    }
+  public String getUnitNumber() {
+    return unitNumber;
+  }
 
-    public void setUnitNumber(String unitNumber) {
-        this.unitNumber = unitNumber;
-    }
+  public void setUnitNumber(String unitNumber) {
+    this.unitNumber = unitNumber;
+  }
 
-    public int getFloor() {
-        return floor;
-    }
+  public int getFloor() {
+    return floor;
+  }
 
-    public void setFloor(int floor) {
-        this.floor = floor;
-    }
+  public void setFloor(int floor) {
+    this.floor = floor;
+  }
 
-    public User getOwner() {
-        return owner;
-    }
+  public User getOwner() {
+    return owner;
+  }
 
-    public void setOwner(User owner) {
-        this.owner = owner;
-    }
+  public void setOwner(User owner) {
+    this.owner = owner;
+  }
 
-    public List<Expense> getExpenses() {
-        return expenses;
-    }
+  public List<Expense> getExpenses() {
+    return expenses;
+  }
 
-    public void setExpenses(List<Expense> expenses) {
-        this.expenses = expenses;
-    }
+  public void setExpenses(List<Expense> expenses) {
+    this.expenses = expenses;
+  }
 
-    public List<Notification> getNotifications() {
-        return notifications;
-    }
+  public List<Notification> getNotifications() {
+    return notifications;
+  }
 
-    public void setNotifications(List<Notification> notifications) {
-        this.notifications = notifications;
-    }
+  public void setNotifications(List<Notification> notifications) {
+    this.notifications = notifications;
+  }
 
-    // Métodos toString, equals e hashCode
-    @Override
-    public String toString() {
-        return "Resident{" +
-                "id='" + id + '\'' +
-                ", unitNumber='" + unitNumber + '\'' +
-                ", floor=" + floor +
-                ", owner=" + (owner != null ? owner.getUsername() : null) +
-                ", expenses=" + expenses +
-                ", notifications=" + notifications +
-                '}';
-    }
+  // Métodos toString, equals e hashCode
+  @Override
+  public String toString() {
+    return "Resident{"
+        + "id='"
+        + id
+        + '\''
+        + ", unitNumber='"
+        + unitNumber
+        + '\''
+        + ", floor="
+        + floor
+        + ", owner="
+        + (owner != null ? owner.getUsername() : null)
+        + ", expenses="
+        + expenses
+        + ", notifications="
+        + notifications
+        + '}';
+  }
 
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        Resident resident = (Resident) o;
-        return floor == resident.floor &&
-               Objects.equals(id, resident.id) &&
-               Objects.equals(unitNumber, resident.unitNumber) &&
-               Objects.equals(owner, resident.owner) &&
-               Objects.equals(expenses, resident.expenses) &&
-               Objects.equals(notifications, resident.notifications);
-    }
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+    Resident resident = (Resident) o;
+    return floor == resident.floor
+        && Objects.equals(id, resident.id)
+        && Objects.equals(unitNumber, resident.unitNumber)
+        && Objects.equals(owner, resident.owner)
+        && Objects.equals(expenses, resident.expenses)
+        && Objects.equals(notifications, resident.notifications);
+  }
 
-    @Override
-    public int hashCode() {
-        return Objects.hash(id, unitNumber, floor, owner, expenses, notifications);
-    }
+  @Override
+  public int hashCode() {
+    return Objects.hash(id, unitNumber, floor, owner, expenses, notifications);
+  }
 }

@@ -17,10 +17,9 @@
 
 package com.radael.condoguard.repository;
 
+import com.radael.condoguard.model.Resident;
 import org.springframework.data.mongodb.repository.MongoRepository;
 
-import com.radael.condoguard.model.Resident;
-
 public interface ResidentRepository extends MongoRepository<Resident, String> {
-    // Métodos de consulta personalizados, se necessário
+  // Métodos de consulta personalizados, se necessário
 }

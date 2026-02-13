@@ -17,112 +17,128 @@
 
 package com.radael.condoguard.model;
 
-import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.mapping.Document;
-
 import java.util.Date;
 import java.util.List;
 import java.util.Objects;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.mapping.Document;
 
 @Document(collection = "notifications")
 public class Notification {
-    @Id
-    private String id;
-    private String message; // Mensagem da notificação
-    private User createdBy; // Usuário que criou a notificação
-    private Date createdAt; // Data de criação da notificação
-    private List<Resident> residents; // Destinatários (residências)
-    private List<ShopOwner> shopOwners; // Destinatários (lojas)
+  @Id private String id;
+  private String message; // Mensagem da notificação
+  private User createdBy; // Usuário que criou a notificação
+  private Date createdAt; // Data de criação da notificação
+  private List<Resident> residents; // Destinatários (residências)
+  private List<ShopOwner> shopOwners; // Destinatários (lojas)
 
-    // Construtor padrão
-    public Notification() {}
+  // Construtor padrão
+  public Notification() {}
 
-    // Construtor com parâmetros
-    public Notification(String message, User createdBy, Date createdAt, List<Resident> residents, List<ShopOwner> shopOwners) {
-        this.message = message;
-        this.createdBy = createdBy;
-        this.createdAt = (createdAt != null) ? new Date(createdAt.getTime()) : null; // Cópia defensiva para evitar mutabilidade
-        this.residents = residents;
-        this.shopOwners = shopOwners;
-    }
+  // Construtor com parâmetros
+  public Notification(
+      String message,
+      User createdBy,
+      Date createdAt,
+      List<Resident> residents,
+      List<ShopOwner> shopOwners) {
+    this.message = message;
+    this.createdBy = createdBy;
+    this.createdAt =
+        (createdAt != null)
+            ? new Date(createdAt.getTime())
+            : null; // Cópia defensiva para evitar mutabilidade
+    this.residents = residents;
+    this.shopOwners = shopOwners;
+  }
 
-    // Getters e Setters
-    public String getId() {
-        return id;
-    }
+  // Getters e Setters
+  public String getId() {
+    return id;
+  }
 
-    public void setId(String id) {
-        this.id = id;
-    }
+  public void setId(String id) {
+    this.id = id;
+  }
 
-    public String getMessage() {
-        return message;
-    }
+  public String getMessage() {
+    return message;
+  }
 
-    public void setMessage(String message) {
-        this.message = message;
-    }
+  public void setMessage(String message) {
+    this.message = message;
+  }
 
-    public User getCreatedBy() {
-        return createdBy;
-    }
+  public User getCreatedBy() {
+    return createdBy;
+  }
 
-    public void setCreatedBy(User createdBy) {
-        this.createdBy = createdBy;
-    }
+  public void setCreatedBy(User createdBy) {
+    this.createdBy = createdBy;
+  }
 
-    public Date getCreatedAt() {
-        return (createdAt != null) ? new Date(createdAt.getTime()) : null; // Retorna uma cópia defensiva
-    }
+  public Date getCreatedAt() {
+    return (createdAt != null)
+        ? new Date(createdAt.getTime())
+        : null; // Retorna uma cópia defensiva
+  }
 
-    public void setCreatedAt(Date createdAt) {
-        this.createdAt = (createdAt != null) ? new Date(createdAt.getTime()) : null;
-    }
+  public void setCreatedAt(Date createdAt) {
+    this.createdAt = (createdAt != null) ? new Date(createdAt.getTime()) : null;
+  }
 
-    public List<Resident> getResidents() {
-        return residents;
-    }
+  public List<Resident> getResidents() {
+    return residents;
+  }
 
-    public void setResidents(List<Resident> residents) {
-        this.residents = residents;
-    }
+  public void setResidents(List<Resident> residents) {
+    this.residents = residents;
+  }
 
-    public List<ShopOwner> getShopOwners() {
-        return shopOwners;
-    }
+  public List<ShopOwner> getShopOwners() {
+    return shopOwners;
+  }
 
-    public void setShopOwners(List<ShopOwner> shopOwners) {
-        this.shopOwners = shopOwners;
-    }
+  public void setShopOwners(List<ShopOwner> shopOwners) {
+    this.shopOwners = shopOwners;
+  }
 
-    // Métodos toString, equals e hashCode
-    @Override
-    public String toString() {
-        return "Notification{" +
-                "id='" + id + '\'' +
-                ", message='" + message + '\'' +
-                ", createdBy=" + (createdBy != null ? createdBy.getUsername() : null) +
-                ", createdAt=" + createdAt +
-                ", residents=" + residents +
-                ", shopOwners=" + shopOwners +
-                '}';
-    }
+  // Métodos toString, equals e hashCode
+  @Override
+  public String toString() {
+    return "Notification{"
+        + "id='"
+        + id
+        + '\''
+        + ", message='"
+        + message
+        + '\''
+        + ", createdBy="
+        + (createdBy != null ? createdBy.getUsername() : null)
+        + ", createdAt="
+        + createdAt
+        + ", residents="
+        + residents
+        + ", shopOwners="
+        + shopOwners
+        + '}';
+  }
 
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        Notification that = (Notification) o;
-        return Objects.equals(id, that.id) &&
-               Objects.equals(message, that.message) &&
-               Objects.equals(createdBy, that.createdBy) &&
-               Objects.equals(createdAt, that.createdAt) &&
-               Objects.equals(residents, that.residents) &&
-               Objects.equals(shopOwners, that.shopOwners);
-    }
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+    Notification that = (Notification) o;
+    return Objects.equals(id, that.id)
+        && Objects.equals(message, that.message)
+        && Objects.equals(createdBy, that.createdBy)
+        && Objects.equals(createdAt, that.createdAt)
+        && Objects.equals(residents, that.residents)
+        && Objects.equals(shopOwners, that.shopOwners);
+  }
 
-    @Override
-    public int hashCode() {
-        return Objects.hash(id, message, createdBy, createdAt, residents, shopOwners);
-    }
+  @Override
+  public int hashCode() {
+    return Objects.hash(id, message, createdBy, createdAt, residents, shopOwners);
+  }
 }
