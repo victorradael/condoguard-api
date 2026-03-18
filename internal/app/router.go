@@ -17,6 +17,7 @@ import (
 	"github.com/victorradael/condoguard/api/internal/shopowner"
 	"github.com/victorradael/condoguard/api/internal/user"
 	pkgjwt "github.com/victorradael/condoguard/api/pkg/jwt"
+	"github.com/victorradael/condoguard/api/pkg/openapi"
 )
 
 // NewRouter builds the full HTTP handler tree with all domain routes and
@@ -29,6 +30,10 @@ func NewRouter(logger *slog.Logger, metrics *middleware.Metrics) http.Handler {
 
 	// ── Metrics (expvar) ───────────────────────────────────────────────────────
 	mux.Handle("GET /metrics", expvar.Handler())
+
+	// ── OpenAPI spec + Swagger UI ──────────────────────────────────────────────
+	mux.Handle("GET /openapi.json", openapi.Handler())
+	mux.Handle("GET /docs", openapi.UIHandler())
 
 	// ── Dependencies ───────────────────────────────────────────────────────────
 	jwtSecret := os.Getenv("JWT_SECRET_KEY")

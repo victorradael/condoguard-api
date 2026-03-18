@@ -70,3 +70,29 @@ func TestMetricsEndpoint_Returns200(t *testing.T) {
 		t.Errorf("expected 200 from /metrics, got %d", rec.Code)
 	}
 }
+
+func TestOpenAPIEndpoint_Returns200WithSpec(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/openapi.json", nil)
+	rec := httptest.NewRecorder()
+	newTestRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 from /openapi.json, got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json; charset=utf-8" {
+		t.Errorf("expected application/json content-type, got %q", ct)
+	}
+}
+
+func TestDocsEndpoint_Returns200WithHTML(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/docs", nil)
+	rec := httptest.NewRecorder()
+	newTestRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 from /docs, got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Errorf("expected text/html content-type, got %q", ct)
+	}
+}
