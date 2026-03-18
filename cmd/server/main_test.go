@@ -7,13 +7,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/victorradael/condoguard/api/internal/app"
 	"github.com/victorradael/condoguard/api/internal/middleware"
 )
 
 func newTestRouter() http.Handler {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	metrics := middleware.NewMetrics()
-	return NewRouter(logger, metrics)
+	return app.NewRouter(logger, metrics)
 }
 
 func TestHealthEndpoint_Returns200(t *testing.T) {
