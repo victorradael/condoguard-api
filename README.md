@@ -1,146 +1,179 @@
 <div style="text-align: center;">
-    <img src="https://github.com/victorradael/condoguard/blob/main/assets/condoguard-logo.png?raw=true" alt="CondoguardLogo"  height="200">
+    <img src="https://github.com/victorradael/condoguard/blob/main/assets/condoguard-logo.png?raw=true" alt="CondoguardLogo" height="200">
 </div>
 
+# CondoGuard API
 
-# API
+REST API do CondoGuard — sistema de gestão financeira e administrativa de condomínios.
 
-**CONDOGUARD API** é um aplicativo em desenvolvimento que visa ajudar os condôminos a administrar suas despesas condominiais de forma eficiente e preventiva. Com uma abordagem inovadora, o **CONDOGUARD API** permite que os usuários gerenciem suas despesas, façam previsões financeiras e identifiquem possíveis problemas antes que eles se tornem críticos.
+## Stack
 
-## Objetivo
+| Camada | Tecnologia |
+|--------|-----------|
+| Linguagem | Go 1.25+ |
+| HTTP | `net/http` (stdlib, Go 1.22+ method routing) |
+| Banco de dados | MongoDB 7 |
+| Autenticação | JWT HS256 (`github.com/golang-jwt/jwt/v5`) |
+| Senhas | bcrypt (`golang.org/x/crypto`) |
+| Logging | `log/slog` (stdlib) |
+| Métricas | `expvar` (stdlib) |
 
-O objetivo principal do **CONDOGUARD API** é fornecer uma ferramenta robusta e amigável para a gestão financeira de condomínios, ajudando tanto os administradores quanto os moradores a terem uma visão clara de suas despesas, além de se prevenirem contra futuros problemas com base no histórico de gastos.
+## Pré-requisitos
 
-## Funcionalidades
+- Go 1.22+
+- Docker e Docker Compose (para MongoDB local)
 
-- **Gerenciamento de Despesas**: Registre e acompanhe todas as despesas do condomínio por unidade (residencial ou comercial).
-- **Previsão de Gastos**: Use dados históricos para prever gastos futuros e planejar o orçamento.
-- **Notificações Inteligentes**: Receba alertas sobre possíveis problemas, como vazamentos ou aumentos inesperados de consumo.
-- **Autenticação Segura**: Sistema de login seguro utilizando JWT para proteger dados sensíveis.
-- **Sistema de Comunicação**: Integração para permitir uma comunicação eficaz entre síndicos e moradores.
-  
-## Tecnologias Utilizadas
+## Configuração
 
-- **Backend**: Spring Boot
-- **Banco de Dados**: MongoDB
-- **Segurança**: Autenticação e autorização com JWT
-- **Linguagem de Programação**: Java
+Copie `.env.example` para `.env` e preencha os valores:
 
-## Instalação e Configuração
+```bash
+cp .env.example .env
+```
 
-1. Clone o repositório:
+| Variável | Descrição | Padrão |
+|----------|-----------|--------|
+| `MONGODB_URI` | URI de conexão com o MongoDB | — |
+| `JWT_SECRET_KEY` | Segredo JWT em Base64 | — |
+| `PORT` | Porta do servidor HTTP | `8080` |
+| `MONGO_DB` | Nome do banco de dados | `condoguard` |
 
-    ```bash
-    git clone https://github.com/seu-usuario/condoguard.git
-    cd condoguard
-    ```
+## Rodando localmente
 
-2. Certifique-se de ter o MongoDB em execução localmente ou configure a URL de conexão no arquivo `application.properties`:
+```bash
+# Subir MongoDB
+make dev-up
 
-    ```properties
-    spring.data.mongodb.uri=mongodb://localhost:27017/condoguard
-    ```
+# Rodar o servidor
+make run
+```
 
-3. Configure o segredo JWT no arquivo `application.properties`:
+## Testes
 
-    ```properties
-    jwt.secret=SeuSegredoJWT
-    ```
+```bash
+# Testes unitários (sem banco)
+make test-unit
 
-4. Execute o projeto:
+# Todos os testes (unitários + integração com banco)
+make test-db-up   # sobe MongoDB de teste na porta 27018
+MONGODB_URI=mongodb://root:secret@localhost:27018/condoguard_test?authSource=admin \
+JWT_SECRET_KEY=dGVzdA== \
+make test
 
-    ```bash
-    mvn spring-boot:run
-    ```
+# Cobertura
+make test-cover
+```
 
-## Endpoints da API
+## Endpoints
 
-### Autenticação
+### Autenticação (público)
 
-- **POST** `/auth/register`: Registrar um novo usuário.
-- **POST** `/auth/login`: Fazer login com credenciais e receber um token JWT.
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| `POST` | `/auth/register` | Registrar usuário |
+| `POST` | `/auth/login` | Login — retorna `{ token, roles }` |
 
-### Usuários
+### Usuários (requer `ROLE_ADMIN`)
 
-- **GET** `/users`: Listar todos os usuários (requer autenticação).
-- **GET** `/users/{id}`: Obter detalhes de um usuário específico (requer autenticação).
-- **POST** `/users`: Criar um novo usuário.
-- **PUT** `/users/{id}`: Atualizar um usuário existente.
-- **DELETE** `/users/{id}`: Deletar um usuário.
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| `GET` | `/users` | Listar usuários |
+| `GET` | `/users/{id}` | Obter usuário |
+| `POST` | `/users` | Criar usuário |
+| `PUT` | `/users/{id}` | Atualizar usuário (e-mail imutável) |
+| `DELETE` | `/users/{id}` | Remover usuário |
 
-### Residências
+### Residências (requer autenticação)
 
-- **GET** `/residents`: Listar todas as residências.
-- **GET** `/residents/{id}`: Obter detalhes de uma residência específica.
-- **POST** `/residents`: Criar uma nova residência.
-- **PUT** `/residents/{id}`: Atualizar uma residência existente.
-- **DELETE** `/residents/{id}`: Deletar uma residência.
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| `GET` | `/residents` | Listar residências |
+| `GET` | `/residents/{id}` | Obter residência |
+| `POST` | `/residents` | Criar residência |
+| `PUT` | `/residents/{id}` | Atualizar residência |
+| `DELETE` | `/residents/{id}` | Remover residência |
 
-### Lojas
+> Regra de negócio: `unitNumber` deve ser único dentro do mesmo `condominiumId`.
 
-- **GET** `/shopOwners`: Listar todas as lojas.
-- **GET** `/shopOwners/{id}`: Obter detalhes de uma loja específica.
-- **POST** `/shopOwners`: Criar uma nova loja.
-- **PUT** `/shopOwners/{id}`: Atualizar uma loja existente.
-- **DELETE** `/shopOwners/{id}`: Deletar uma loja.
+### Lojas (requer autenticação)
 
-### Notificações
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| `GET` | `/shopOwners` | Listar lojas |
+| `GET` | `/shopOwners/{id}` | Obter loja |
+| `POST` | `/shopOwners` | Criar loja (CNPJ obrigatório e validado) |
+| `PUT` | `/shopOwners/{id}` | Atualizar loja (CNPJ imutável) |
+| `DELETE` | `/shopOwners/{id}` | Remover loja |
 
-- **GET** `/notifications`: Listar todas as notificações.
-- **GET** `/notifications/{id}`: Obter detalhes de uma notificação específica.
-- **POST** `/notifications`: Criar uma nova notificação.
-- **PUT** `/notifications/{id}`: Atualizar uma notificação existente.
-- **DELETE** `/notifications/{id}`: Deletar uma notificação.
+### Despesas (requer autenticação)
 
-### Despesas
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| `GET` | `/expenses` | Listar despesas (aceita `?from=&to=` em RFC3339) |
+| `GET` | `/expenses/{id}` | Obter despesa |
+| `POST` | `/expenses` | Criar despesa |
+| `PUT` | `/expenses/{id}` | Atualizar despesa |
+| `DELETE` | `/expenses/{id}` | Remover despesa |
 
-- **GET** `/expenses`: Listar todas as despesas.
-- **GET** `/expenses/{id}`: Obter detalhes de uma despesa específica.
-- **POST** `/expenses`: Criar uma nova despesa.
-- **PUT** `/expenses/{id}`: Atualizar uma despesa existente.
-- **DELETE** `/expenses/{id}`: Deletar uma despesa.
+> Regra de negócio: `amountCents` deve ser positivo (inteiro, em centavos).  
+> `dueDate` é obrigatório (formato RFC3339).
 
-## Contribuição
+### Notificações (requer autenticação)
 
-Contribuições são bem-vindas! Se você deseja adicionar novas funcionalidades, corrigir bugs ou melhorar a documentação, siga os passos abaixo:
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| `GET` | `/notifications` | Listar notificações |
+| `GET` | `/notifications/{id}` | Obter notificação |
+| `POST` | `/notifications` | Criar notificação |
+| `PUT` | `/notifications/{id}` | Atualizar notificação |
+| `DELETE` | `/notifications/{id}` | Remover notificação |
+| `PUT` | `/notifications/{id}/read` | Marcar como lida (idempotente) |
 
-1. Faça um fork do projeto.
-2. Crie uma nova branch para a sua feature:
+### Observabilidade
 
-    ```bash
-    git checkout -b feature/nova-feature
-    ```
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| `GET` | `/health` | Health check — `{ "status": "ok" }` |
+| `GET` | `/metrics` | Métricas expvar (requests, erros 5xx, latência) |
 
-3. Faça as alterações desejadas e commit:
+## Estrutura do projeto
 
-    ```bash
-    git commit -m "Adicionar nova feature"
-    ```
+```
+api/
+├── cmd/server/          — entry point (main.go)
+├── internal/
+│   ├── app/             — NewRouter (wiring de todos os handlers)
+│   ├── auth/            — POST /auth/register, POST /auth/login
+│   ├── user/            — CRUD /users
+│   ├── resident/        — CRUD /residents
+│   ├── shopowner/       — CRUD /shopOwners
+│   ├── expense/         — CRUD /expenses
+│   ├── notification/    — CRUD /notifications + mark-as-read
+│   ├── middleware/      — JWT auth, request ID, logging, métricas
+│   └── parity/          — testes de paridade end-to-end
+├── pkg/
+│   ├── jwt/             — geração e validação de tokens
+│   └── password/        — hash bcrypt e verificação
+├── specs/               — specs de domínio e plano de migração
+├── docker-compose.yml
+├── Makefile
+└── .env.example
+```
 
-4. Envie suas alterações para o repositório:
+## Autenticação
 
-    ```bash
-    git push origin feature/nova-feature
-    ```
+Todas as rotas protegidas exigem o header:
 
-5. Abra um Pull Request explicando as mudanças propostas.
+```
+Authorization: Bearer <token>
+```
 
-## Futuras Melhorias
-
-CondoGuard está em constante desenvolvimento. Algumas das funcionalidades planejadas para as próximas versões incluem:
-
-- **Integração com Sistemas de Pagamento**: Permitir que os usuários paguem suas despesas diretamente pelo aplicativo.
-- **Dashboard Analítico**: Visualize dados financeiros e estatísticas de consumo.
-- **Integração com IoT**: Monitore consumo de energia, água e gás em tempo real.
+O token é obtido via `POST /auth/login` e expira em **10 horas**.
 
 ## Licença
 
-Este projeto é licenciado sob a [GNU General Public License v3.0](LICENSE).
-
-## Contato
-
-Para mais informações ou sugestões, entre em contato conosco pelo e-mail: [radael.engenharia@gmail.com](mailto:seu-email@exemplo.com).
+[GNU General Public License v3.0](LICENSE)
 
 ---
 
-**CondoGuard** - Simplificando a gestão do seu condomínio!
+**CondoGuard** — Simplificando a gestão do seu condomínio.
