@@ -10,7 +10,10 @@ import (
 
 type contextKey string
 
-const userIDKey contextKey = "userID"
+const (
+	userIDKey contextKey = "userID"
+	rolesKey  contextKey = "roles"
+)
 
 // Authenticate returns a middleware that validates the JWT in the
 // Authorization: Bearer <token> header.
@@ -32,6 +35,7 @@ func Authenticate(jwtSvc *pkgjwt.Service) func(http.Handler) http.Handler {
 			}
 
 			ctx := context.WithValue(r.Context(), userIDKey, claims.UserID)
+			ctx = context.WithValue(ctx, rolesKey, claims.Roles)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -42,6 +46,13 @@ func Authenticate(jwtSvc *pkgjwt.Service) func(http.Handler) http.Handler {
 func UserIDFromContext(ctx context.Context) string {
 	id, _ := ctx.Value(userIDKey).(string)
 	return id
+}
+
+// RolesFromContext retrieves the authenticated user roles from the context.
+// Returns nil if not present.
+func RolesFromContext(ctx context.Context) []string {
+	roles, _ := ctx.Value(rolesKey).([]string)
+	return roles
 }
 
 func extractBearer(r *http.Request) (string, bool) {
