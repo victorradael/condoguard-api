@@ -144,10 +144,12 @@ func NewRouter(logger *slog.Logger, metrics *middleware.Metrics) http.Handler {
 	mux.Handle("/notifications/", notification.NewHandler(notification.NewService(notifRepo), authMW))
 
 	// ── Global middleware stack (outermost = first executed) ──────────────────
-	// Order: RequestID → Logging → Metrics → mux
-	return middleware.RequestID(
-		middleware.Logging(logger)(
-			metrics.Middleware(mux),
+	// Order: CORS → RequestID → Logging → Metrics → mux
+	return middleware.CORS(
+		middleware.RequestID(
+			middleware.Logging(logger)(
+				metrics.Middleware(mux),
+			),
 		),
 	)
 }

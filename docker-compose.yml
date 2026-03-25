@@ -1,4 +1,19 @@
 services:
+  api:
+    build: .
+    container_name: condoguard-api
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - MONGODB_URI=mongodb://${MONGO_USER:-root}:${MONGO_PASSWORD:-secret}@mongodb:27017/${MONGO_DB:-condoguard}?authSource=admin
+      - MONGO_DB=${MONGO_DB:-condoguard}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-Y2hhbmdlLW1lLWluLXByb2R1Y3Rpb24=}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
   mongodb:
     image: mongo:7
     container_name: condoguard-mongo
