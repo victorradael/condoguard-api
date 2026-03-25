@@ -1,4 +1,4 @@
-.PHONY: test test-unit test-integration lint fmt vet build run dev-up dev-down tidy
+.PHONY: test test-unit test-integration lint fmt vet build run dev-up dev-down tidy logs up down
 
 GOBIN ?= $(shell go env GOPATH)/bin
 BINARY = condoguard-api
@@ -39,6 +39,15 @@ tidy:
 	go mod tidy
 
 # ── Docker ────────────────────────────────────────────────────────────────────
+up:
+	docker compose up --build -d api mongodb
+
+down:
+	docker compose down
+
+logs:
+	docker compose logs -f api
+
 dev-up:
 	docker compose up -d mongodb
 

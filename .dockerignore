@@ -1,0 +1,7 @@
+bin/
+vendor/
+.env
+.git
+.gitignore
+*.test
+coverage.out
