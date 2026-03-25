@@ -66,18 +66,18 @@ func TestExpense_Create_Success_LinkedToShopOwner(t *testing.T) {
 
 // ── Validação: valor em centavos ──────────────────────────────────────────────
 
-func TestExpense_Create_ZeroAmount_ReturnsValidationError(t *testing.T) {
+func TestExpense_Create_ZeroAmount_IsValid(t *testing.T) {
 	svc := newService()
 
 	_, err := svc.Create(context.Background(), expense.CreateRequest{
-		Description: "Taxa",
+		Description: "Isenção",
 		AmountCents: 0,
 		DueDate:     mustDate("2026-03-31T00:00:00Z"),
 		ResidentID:  "resident-1",
 	})
 
-	if !expense.IsValidationError(err) {
-		t.Errorf("expected validation error for zero amount, got %v", err)
+	if err != nil {
+		t.Errorf("expected zero amount to be valid, got error: %v", err)
 	}
 }
 

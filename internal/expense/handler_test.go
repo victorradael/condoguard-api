@@ -154,18 +154,18 @@ func TestExpenses_Create_Returns201(t *testing.T) {
 	}
 }
 
-func TestExpenses_Create_ZeroAmount_Returns422(t *testing.T) {
+func TestExpenses_Create_ZeroAmount_Returns201(t *testing.T) {
 	router := newTestRouter(t)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, authReq(http.MethodPost, "/expenses", validToken(t), map[string]any{
-		"description": "Taxa",
+		"description": "Isenção",
 		"amountCents": 0,
 		"dueDate":     "2026-03-31T00:00:00Z",
 		"residentId":  "resident-1",
 	}))
 
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Errorf("expected 422, got %d", rec.Code)
+	if rec.Code != http.StatusCreated {
+		t.Errorf("expected 201, got %d", rec.Code)
 	}
 }
 

@@ -24,8 +24,8 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Expense, erro
 	if req.Description == "" {
 		return nil, fmt.Errorf("%w: description is required", ErrValidation)
 	}
-	if req.AmountCents <= 0 {
-		return nil, fmt.Errorf("%w: amountCents must be positive", ErrValidation)
+	if req.AmountCents < 0 {
+		return nil, fmt.Errorf("%w: amountCents must be zero or positive", ErrValidation)
 	}
 	if req.DueDate.IsZero() {
 		return nil, fmt.Errorf("%w: dueDate is required", ErrValidation)
@@ -65,7 +65,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*Ex
 	}
 
 	if req.AmountCents < 0 {
-		return nil, fmt.Errorf("%w: amountCents must be positive", ErrValidation)
+		return nil, fmt.Errorf("%w: amountCents must be zero or positive", ErrValidation)
 	}
 
 	if req.Description != "" {
