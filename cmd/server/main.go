@@ -26,9 +26,23 @@ func main() {
 		port = "8080"
 	}
 
+	cfg, err := app.ConfigFromEnv()
+	if err != nil {
+		slog.Error("config", "error", err)
+		os.Exit(1)
+	}
+	startCtx, cancelStart := context.WithTimeout(context.Background(), 30*time.Second)
+	application, err := app.New(startCtx, cfg, logger, metrics)
+	cancelStart()
+	if err != nil {
+		slog.Error("startup", "error", err)
+		os.Exit(1)
+	}
+	defer application.Close()
+
 	srv := &http.Server{
 		Addr:         ":" + port,
-		Handler:      app.NewRouter(logger, metrics),
+		Handler:      application.Handler,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,

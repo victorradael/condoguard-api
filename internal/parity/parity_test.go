@@ -1,10 +1,11 @@
 // Package parity contains integration tests that validate the Go API contract
 // against the original Java/Spring Boot implementation.
 //
-// These tests run only when MONGODB_URI is set (i.e. in the integration CI job).
-// They exercise the full HTTP stack end-to-end — no mocks.
+// These tests run only when TEST_DATABASE_URL is set (i.e. in the integration
+// CI job). They exercise the full HTTP stack end-to-end against PostgreSQL —
+// no mocks. Each server gets its own freshly migrated database.
 //
-// Run: MONGODB_URI=... JWT_SECRET_KEY=... go test ./internal/parity/... -v -count=1
+// Run: TEST_DATABASE_URL=postgres://... go test ./internal/parity/... -v -count=1
 package parity_test
 
 import (
@@ -15,11 +16,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/victorradael/condoguard/api/internal/app"
+	"github.com/victorradael/condoguard/api/internal/db/dbtest"
 	"github.com/victorradael/condoguard/api/internal/middleware"
 )
 
@@ -27,9 +28,22 @@ import (
 
 func newServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	cfg, err := app.ConfigFromEnv()
+	if err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	cfg.DatabaseURL = dbtest.NewDatabase(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	metrics := middleware.NewMetrics()
-	return httptest.NewServer(app.NewRouter(logger, metrics))
+	a, err := app.New(context.Background(), cfg, logger, middleware.NewMetrics())
+	if err != nil {
+		t.Fatalf("app: %v", err)
+	}
+	srv := httptest.NewServer(a.Handler)
+	t.Cleanup(func() {
+		srv.Close()
+		a.Close()
+	})
+	return srv
 }
 
 func do(t *testing.T, srv *httptest.Server, method, path string, body any, token string) *http.Response {
@@ -65,18 +79,16 @@ func decodeJSON(t *testing.T, r io.Reader) map[string]any {
 	return m
 }
 
-func skipWithoutMongo(t *testing.T) {
+func skipWithoutDB(t *testing.T) {
 	t.Helper()
-	if os.Getenv("MONGODB_URI") == "" {
-		t.Skip("MONGODB_URI not set — skipping parity test")
-	}
+	dbtest.URL(t)
 }
 
 // ── Parity: Auth ──────────────────────────────────────────────────────────────
 
 // Java: POST /auth/register → 201 { "message": "User registered successfully!" }
 func TestParity_Register_Returns201WithMessage(t *testing.T) {
-	skipWithoutMongo(t)
+	skipWithoutDB(t)
 	srv := newServer(t)
 	defer srv.Close()
 
@@ -98,7 +110,7 @@ func TestParity_Register_Returns201WithMessage(t *testing.T) {
 
 // Java: POST /auth/login → 200 { "token": "...", "roles": [...] }
 func TestParity_Login_Returns200WithTokenAndRoles(t *testing.T) {
-	skipWithoutMongo(t)
+	skipWithoutDB(t)
 	srv := newServer(t)
 	defer srv.Close()
 
@@ -130,7 +142,7 @@ func TestParity_Login_Returns200WithTokenAndRoles(t *testing.T) {
 
 // Java: GET /protected without token → 401
 func TestParity_ProtectedRoute_NoToken_Returns401(t *testing.T) {
-	skipWithoutMongo(t)
+	skipWithoutDB(t)
 	srv := newServer(t)
 	defer srv.Close()
 
@@ -144,7 +156,7 @@ func TestParity_ProtectedRoute_NoToken_Returns401(t *testing.T) {
 
 // Java: GET /users without ADMIN role → 403
 func TestParity_UsersRoute_NonAdmin_Returns403(t *testing.T) {
-	skipWithoutMongo(t)
+	skipWithoutDB(t)
 	srv := newServer(t)
 	defer srv.Close()
 
@@ -171,7 +183,7 @@ func TestParity_UsersRoute_NonAdmin_Returns403(t *testing.T) {
 
 // Java: GET /{resource}/{nonexistent} → 404
 func TestParity_GetByID_NonExistent_Returns404(t *testing.T) {
-	skipWithoutMongo(t)
+	skipWithoutDB(t)
 	srv := newServer(t)
 	defer srv.Close()
 
@@ -207,7 +219,7 @@ func TestParity_GetByID_NonExistent_Returns404(t *testing.T) {
 // ── Parity: Full CRUD round-trip ──────────────────────────────────────────────
 
 func TestParity_Expense_CRUD_RoundTrip(t *testing.T) {
-	skipWithoutMongo(t)
+	skipWithoutDB(t)
 	srv := newServer(t)
 	defer srv.Close()
 
@@ -275,7 +287,7 @@ func TestParity_Expense_CRUD_RoundTrip(t *testing.T) {
 }
 
 func TestParity_Notification_MarkAsRead_Idempotent(t *testing.T) {
-	skipWithoutMongo(t)
+	skipWithoutDB(t)
 	srv := newServer(t)
 	defer srv.Close()
 
@@ -324,7 +336,7 @@ func TestParity_Notification_MarkAsRead_Idempotent(t *testing.T) {
 
 // Validates that the Go API response includes all fields expected by clients.
 func TestParity_ResponseSchema_Resident(t *testing.T) {
-	skipWithoutMongo(t)
+	skipWithoutDB(t)
 	srv := newServer(t)
 	defer srv.Close()
 
@@ -363,7 +375,7 @@ func TestParity_ResponseSchema_Resident(t *testing.T) {
 // ── Parity: X-Request-Id header ───────────────────────────────────────────────
 
 func TestParity_AllResponses_HaveRequestIDHeader(t *testing.T) {
-	skipWithoutMongo(t)
+	skipWithoutDB(t)
 	srv := newServer(t)
 	defer srv.Close()
 
@@ -379,7 +391,7 @@ func TestParity_AllResponses_HaveRequestIDHeader(t *testing.T) {
 // ── Parity: CORS ──────────────────────────────────────────────────────────────
 
 func TestParity_CORS_OptionsReturnsAllowHeaders(t *testing.T) {
-	skipWithoutMongo(t)
+	skipWithoutDB(t)
 	srv := newServer(t)
 	defer srv.Close()
 

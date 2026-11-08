@@ -9,8 +9,8 @@ import (
 
 // Metrics holds in-process counters exposed via expvar.
 type Metrics struct {
-	totalRequests int64
-	errorRequests int64
+	totalRequests  int64
+	errorRequests  int64
 	totalLatencyMs int64
 
 	varRequests *expvar.Int

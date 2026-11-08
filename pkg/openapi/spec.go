@@ -324,6 +324,7 @@ func buildPaths() map[string]PathItem {
 					"200": jsonResp("Login bem-sucedido", "LoginResponse"),
 					"401": errResp("Credenciais inválidas"),
 					"422": errResp("Dados inválidos"),
+					"429": errResp("Muitas tentativas com falha para este usuário a partir deste IP; tente após o tempo do cabeçalho Retry-After"),
 				},
 			},
 		},

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
+
+	"github.com/victorradael/condoguard/api/internal/db/dbtest"
+	"github.com/victorradael/condoguard/api/internal/tenant"
 
 	"github.com/victorradael/condoguard/api/internal/expense"
 	"github.com/victorradael/condoguard/api/internal/middleware"
@@ -302,12 +304,73 @@ func TestExpenses_Delete_NonExistent_Returns404(t *testing.T) {
 	}
 }
 
-// ── Integration ───────────────────────────────────────────────────────────────
+// ── Integration (PostgreSQL; requires TEST_DATABASE_URL) ───────────────────────
 
 func TestIntegration_Expenses_CRUD(t *testing.T) {
-	uri := os.Getenv("MONGODB_URI")
-	if uri == "" {
-		t.Skip("MONGODB_URI not set — skipping integration test")
+	pool := dbtest.NewPool(t)
+	router := tenant.Middleware("condo-test")(expense.NewHandler(expense.NewService(expense.NewPostgresRepository(pool)), middleware.Authenticate(pkgjwt.NewService(handlerSecret))))
+
+	crudRoundTrip(t, router, validToken(t), "/expenses",
+		map[string]any{"description": "Taxa", "amountCents": 15000, "dueDate": "2026-03-31T00:00:00Z", "residentId": "resident-1"},
+		map[string]any{"amountCents": 20000},
+		func(_, updated map[string]any) {
+			if updated["amountCents"] != float64(20000) {
+				t.Errorf("update not persisted: %v", updated)
+			}
+			if updated["dueDate"] != "2026-03-31T00:00:00Z" {
+				t.Errorf("expected dueDate in UTC, got %v", updated["dueDate"])
+			}
+		})
+}
+
+// crudRoundTrip drives create → get → list → update → delete through the HTTP
+// handler backed by the PostgreSQL repository.
+func crudRoundTrip(t *testing.T, router http.Handler, tok, base string, create, update map[string]any, check func(created, updated map[string]any)) {
+	t.Helper()
+	do := func(method, path string, body any) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, authReq(method, path, tok, body))
+		return rec
 	}
-	t.Log("integration scaffold ready")
+
+	rec := do(http.MethodPost, base, create)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d — %s", rec.Code, rec.Body.String())
+	}
+	var created map[string]any
+	_ = json.NewDecoder(rec.Body).Decode(&created)
+	id, _ := created["id"].(string)
+	if id == "" {
+		t.Fatal("create: expected id")
+	}
+
+	if rec = do(http.MethodGet, base+"/"+id, nil); rec.Code != http.StatusOK {
+		t.Fatalf("get: expected 200, got %d", rec.Code)
+	}
+	if rec = do(http.MethodGet, base, nil); rec.Code != http.StatusOK {
+		t.Fatalf("list: expected 200, got %d", rec.Code)
+	}
+	var list []map[string]any
+	_ = json.NewDecoder(rec.Body).Decode(&list)
+	if len(list) != 1 {
+		t.Fatalf("list: expected 1 item, got %d", len(list))
+	}
+
+	rec = do(http.MethodPut, base+"/"+id, update)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update: expected 200, got %d — %s", rec.Code, rec.Body.String())
+	}
+	if rec = do(http.MethodGet, base+"/"+id, nil); rec.Code != http.StatusOK {
+		t.Fatalf("get after update: expected 200, got %d", rec.Code)
+	}
+	var updated map[string]any
+	_ = json.NewDecoder(rec.Body).Decode(&updated)
+	check(created, updated)
+
+	if rec = do(http.MethodDelete, base+"/"+id, nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete: expected 204, got %d", rec.Code)
+	}
+	if rec = do(http.MethodGet, base+"/"+id, nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("get after delete: expected 404, got %d", rec.Code)
+	}
 }

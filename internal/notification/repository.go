@@ -2,12 +2,9 @@ package notification
 
 import (
 	"context"
-	"errors"
 	"sync"
 
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"github.com/google/uuid"
 )
 
 // Repository defines the persistence contract for the notification domain.
@@ -33,7 +30,7 @@ func NewInMemoryRepository() Repository {
 func (r *inMemoryRepository) Save(_ context.Context, n *Notification) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	n.ID = bson.NewObjectID().Hex()
+	n.ID = uuid.NewString()
 	cp := *n
 	if cp.ResidentIDs == nil {
 		cp.ResidentIDs = []string{}
@@ -86,101 +83,4 @@ func (r *inMemoryRepository) Delete(_ context.Context, id string) error {
 	}
 	delete(r.store, id)
 	return nil
-}
-
-// ── MongoDB ───────────────────────────────────────────────────────────────────
-
-type mongoRepository struct {
-	coll   *mongo.Collection
-	client *mongo.Client
-	dbName string
-}
-
-// MongoRepository extends Repository with test-cleanup capability.
-type MongoRepository interface {
-	Repository
-	Cleanup(ctx context.Context)
-}
-
-func NewMongoRepository(ctx context.Context, uri, dbName string) (MongoRepository, error) {
-	client, err := mongo.Connect(options.Client().ApplyURI(uri))
-	if err != nil {
-		return nil, err
-	}
-	if err := client.Ping(ctx, nil); err != nil {
-		return nil, err
-	}
-
-	coll := client.Database(dbName).Collection("notifications")
-
-	// Index on createdAt for ordered listing.
-	_, err = coll.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys: bson.D{{Key: "createdAt", Value: -1}},
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return &mongoRepository{coll: coll, client: client, dbName: dbName}, nil
-}
-
-func (r *mongoRepository) Save(ctx context.Context, n *Notification) error {
-	if n.ID == "" {
-		n.ID = bson.NewObjectID().Hex()
-	}
-	_, err := r.coll.InsertOne(ctx, n)
-	return err
-}
-
-func (r *mongoRepository) FindByID(ctx context.Context, id string) (*Notification, error) {
-	var n Notification
-	err := r.coll.FindOne(ctx, bson.M{"_id": id}).Decode(&n)
-	if errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, ErrNotFound
-	}
-	return &n, err
-}
-
-func (r *mongoRepository) FindAll(ctx context.Context) ([]*Notification, error) {
-	cursor, err := r.coll.Find(ctx, bson.M{}, options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}))
-	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close(ctx)
-
-	var list []*Notification
-	if err := cursor.All(ctx, &list); err != nil {
-		return nil, err
-	}
-	if list == nil {
-		list = []*Notification{}
-	}
-	return list, nil
-}
-
-func (r *mongoRepository) Update(ctx context.Context, n *Notification) error {
-	result, err := r.coll.ReplaceOne(ctx, bson.M{"_id": n.ID}, n)
-	if err != nil {
-		return err
-	}
-	if result.MatchedCount == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (r *mongoRepository) Delete(ctx context.Context, id string) error {
-	result, err := r.coll.DeleteOne(ctx, bson.M{"_id": id})
-	if err != nil {
-		return err
-	}
-	if result.DeletedCount == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (r *mongoRepository) Cleanup(ctx context.Context) {
-	_ = r.client.Database(r.dbName).Drop(ctx)
-	_ = r.client.Disconnect(ctx)
 }

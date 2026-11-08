@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
-	"github.com/victorradael/condoguard/api/internal/user"
+	"github.com/victorradael/condoguard/api/internal/db/dbtest"
+	"github.com/victorradael/condoguard/api/internal/tenant"
+
 	"github.com/victorradael/condoguard/api/internal/middleware"
+	"github.com/victorradael/condoguard/api/internal/user"
 	pkgjwt "github.com/victorradael/condoguard/api/pkg/jwt"
 )
 
@@ -299,14 +301,73 @@ func TestUsers_Delete_NonExistent_Returns404(t *testing.T) {
 	}
 }
 
-// ── Integration ───────────────────────────────────────────────────────────────
+// ── Integration (PostgreSQL; requires TEST_DATABASE_URL) ───────────────────────
 
 func TestIntegration_Users_CRUD(t *testing.T) {
-	uri := os.Getenv("MONGODB_URI")
-	if uri == "" {
-		t.Skip("MONGODB_URI not set — skipping integration test")
+	pool := dbtest.NewPool(t)
+	router := tenant.Middleware("condo-test")(user.NewHandler(user.NewService(user.NewPostgresRepository(pool)), middleware.Authenticate(pkgjwt.NewService(handlerSecret))))
+
+	crudRoundTrip(t, router, adminToken(t), "/users",
+		map[string]any{"username": "pg-user", "email": "pg-user@example.com", "password": "S3cr3t!Pass", "roles": []string{"ROLE_USER"}},
+		map[string]any{"username": "pg-user-renamed", "email": "ignored@example.com"},
+		func(_, updated map[string]any) {
+			if updated["username"] != "pg-user-renamed" {
+				t.Errorf("expected renamed username, got %v", updated["username"])
+			}
+			if updated["email"] != "pg-user@example.com" {
+				t.Errorf("email must be immutable, got %v", updated["email"])
+			}
+		})
+}
+
+// crudRoundTrip drives create → get → list → update → delete through the HTTP
+// handler backed by the PostgreSQL repository.
+func crudRoundTrip(t *testing.T, router http.Handler, tok, base string, create, update map[string]any, check func(created, updated map[string]any)) {
+	t.Helper()
+	do := func(method, path string, body any) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, authRequest(method, path, tok, body))
+		return rec
 	}
-	// Integration test body omitted until Mongo repo for user is wired.
-	// Will be completed in the same pattern as auth integration test.
-	t.Log("integration scaffold ready — wire MongoRepository to proceed")
+
+	rec := do(http.MethodPost, base, create)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d — %s", rec.Code, rec.Body.String())
+	}
+	var created map[string]any
+	_ = json.NewDecoder(rec.Body).Decode(&created)
+	id, _ := created["id"].(string)
+	if id == "" {
+		t.Fatal("create: expected id")
+	}
+
+	if rec = do(http.MethodGet, base+"/"+id, nil); rec.Code != http.StatusOK {
+		t.Fatalf("get: expected 200, got %d", rec.Code)
+	}
+	if rec = do(http.MethodGet, base, nil); rec.Code != http.StatusOK {
+		t.Fatalf("list: expected 200, got %d", rec.Code)
+	}
+	var list []map[string]any
+	_ = json.NewDecoder(rec.Body).Decode(&list)
+	if len(list) != 1 {
+		t.Fatalf("list: expected 1 item, got %d", len(list))
+	}
+
+	rec = do(http.MethodPut, base+"/"+id, update)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update: expected 200, got %d — %s", rec.Code, rec.Body.String())
+	}
+	if rec = do(http.MethodGet, base+"/"+id, nil); rec.Code != http.StatusOK {
+		t.Fatalf("get after update: expected 200, got %d", rec.Code)
+	}
+	var updated map[string]any
+	_ = json.NewDecoder(rec.Body).Decode(&updated)
+	check(created, updated)
+
+	if rec = do(http.MethodDelete, base+"/"+id, nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete: expected 204, got %d", rec.Code)
+	}
+	if rec = do(http.MethodGet, base+"/"+id, nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("get after delete: expected 404, got %d", rec.Code)
+	}
 }

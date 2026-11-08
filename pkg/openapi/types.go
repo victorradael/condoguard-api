@@ -15,9 +15,9 @@ type Spec struct {
 }
 
 type Info struct {
-	Title       string  `json:"title"`
-	Description string  `json:"description,omitempty"`
-	Version     string  `json:"version"`
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	Version     string   `json:"version"`
 	License     *License `json:"license,omitempty"`
 }
 
@@ -59,9 +59,9 @@ type Parameter struct {
 }
 
 type RequestBody struct {
-	Description string                `json:"description,omitempty"`
-	Required    bool                  `json:"required,omitempty"`
-	Content     map[string]MediaType  `json:"content"`
+	Description string               `json:"description,omitempty"`
+	Required    bool                 `json:"required,omitempty"`
+	Content     map[string]MediaType `json:"content"`
 }
 
 type Response struct {
