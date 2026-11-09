@@ -22,6 +22,15 @@ func TestSpec_HasCorrectOpenAPIVersion(t *testing.T) {
 	}
 }
 
+// A relative server URL resolves against the document: behind the proxy,
+// "Try it out" calls /api/... instead of the web at the root.
+func TestSpec_ServerURLIsRelativeToTheDocument(t *testing.T) {
+	spec := openapi.NewSpec()
+	if len(spec.Servers) != 1 || spec.Servers[0].URL != "." {
+		t.Errorf("expected a single relative server \".\", got %+v", spec.Servers)
+	}
+}
+
 func TestSpec_HasInfoBlock(t *testing.T) {
 	spec := openapi.NewSpec()
 	if spec.Info.Title == "" {
@@ -214,8 +223,9 @@ func TestHandler_SwaggerUI_Returns200WithHTML(t *testing.T) {
 	if !strings.Contains(body, "swagger-ui") {
 		t.Error("expected swagger-ui in HTML body")
 	}
-	if !strings.Contains(body, "/openapi.json") {
-		t.Error("expected /openapi.json reference in swagger UI HTML")
+	// Relative, so /api/docs behind the proxy loads /api/openapi.json.
+	if !strings.Contains(body, `url: "openapi.json"`) {
+		t.Error("swagger UI must load the spec by a relative URL")
 	}
 }
 

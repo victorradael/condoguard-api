@@ -55,6 +55,7 @@ com pelo menos 32 bytes, nem com `CORS_ALLOWED_ORIGINS=*`.
 | `CORS_ALLOWED_ORIGINS` | Origens do web, separadas por vírgula (`*` é recusado) | `http://localhost:3000` |
 | `COOKIE_SECURE` | Cookies com `Secure`; `false` só em HTTP puro fora de `localhost` | `true` |
 | `COOKIE_DOMAIN` | Domínio dos cookies. Com web e API em subdomínios diferentes, use o domínio comum para o `middleware.ts` do web ver a sessão | host da API |
+| `COOKIE_PATH_PREFIX` | Prefixo com que o navegador chega à API quando um proxy a monta num subcaminho (ex.: `/api`). O cookie de refresh fica em `<prefixo>/auth` | — (API na raiz) |
 | `METRICS_TOKEN` | Bearer exigido em `/metrics` (≥ 32 caracteres). Vazio desliga `/metrics` | — |
 | `PORT` | Porta do servidor HTTP | `8080` |
 
@@ -255,7 +256,7 @@ api/
   token expirar (`ACCESS_TOKEN_TTL`, 15 min por padrão), chame
   `POST /auth/refresh` com o `refreshToken` e guarde o novo par.
 - **Web (Next.js):** faça login com `"useCookies": true`. Os tokens ficam em
-  cookies httpOnly (`cg_access` em `/`, `cg_refresh` só em `/auth`), nunca no
+  cookies httpOnly (`cg_access` em `/`, `cg_refresh` só em `/auth`, ou `<COOKIE_PATH_PREFIX>/auth` atrás de proxy), nunca no
   `localStorage`. Requisições que alteram dados com cookie precisam vir de uma
   origem de `CORS_ALLOWED_ORIGINS` (proteção contra CSRF).
 
