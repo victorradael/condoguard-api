@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+# Third-party actions are pinned by commit SHA (tag in the comment);
+# Dependabot (.github/dependabot.yml) proposes the updates.
+
 jobs:
   test:
     name: Test & Lint
@@ -42,26 +45,33 @@ jobs:
       TEST_REDIS_URL: redis://localhost:6379/0
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
           go-version-file: go.mod
 
       - name: Download dependencies
         run: go mod download
 
+      - name: go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
       - name: Vet
         run: go vet ./...
 
       - name: sqlc generated code is up to date
-        uses: sqlc-dev/setup-sqlc@v4
+        uses: sqlc-dev/setup-sqlc@c0209b9199cd1cce6a14fc27cabcec491b651761 # v4.0.0
         with:
           sqlc-version: "1.31.1"
       - run: sqlc diff
 
-      - name: Tests (unit + PostgreSQL + Redis)
+      - name: Tests (unit + PostgreSQL + Redis + end-to-end security)
         run: go test ./... -race -count=1
 
       - name: Migrations up/down from scratch
@@ -73,6 +83,54 @@ jobs:
           go run ./cmd/migrate up
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8.0.0
         with:
           version: v2.15.0
+
+  vuln:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+
+      # Fails on any vulnerability reachable from our code (stdlib included).
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Build
+        run: docker build -t condoguard-api:ci .
+
+      - name: Runs as non-root and becomes healthy
+        run: |
+          test "$(docker image inspect -f '{{.Config.User}}' condoguard-api:ci)" = "10001:10001"
+          docker run -d --name api -e JWT_SECRET_KEY="$(openssl rand -base64 32)" condoguard-api:ci
+          for i in $(seq 1 30); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' api)
+            [ "$status" = healthy ] && exit 0
+            sleep 2
+          done
+          docker logs api
+          echo "container did not become healthy (last status: $status)"
+          exit 1
+
+      - name: Refuses to start without a JWT secret
+        run: |
+          if docker run --rm condoguard-api:ci; then
+            echo "the API must not start without JWT_SECRET_KEY"
+            exit 1
+          fi
