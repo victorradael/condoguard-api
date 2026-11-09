@@ -133,8 +133,8 @@ func TestRedisLimiter_Real(t *testing.T) {
 	defer client.Del(ctx, prefix+"k", prefix+"race")
 
 	for i := 0; i < 2; i++ {
-		if ok, _, err := l.Reserve(ctx, "k"); err != nil || !ok {
-			t.Fatalf("attempt %d must be reserved (err %v)", i+1, err)
+		if ok, _, rerr := l.Reserve(ctx, "k"); rerr != nil || !ok {
+			t.Fatalf("attempt %d must be reserved (err %v)", i+1, rerr)
 		}
 	}
 	ok, retry, err := l.Reserve(ctx, "k")
