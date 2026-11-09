@@ -6,7 +6,8 @@
 //	go run ./cmd/migrate version   # print the current schema version
 //
 // The server already runs "up" on start (DB_MIGRATE_ON_START=true), so this
-// command is for development and operations. It reads DATABASE_URL.
+// command is for development and operations. It reads DATABASE_MIGRATIONS_URL
+// (the schema owner) and falls back to DATABASE_URL.
 package main
 
 import (
@@ -29,9 +30,12 @@ func run() error {
 	if len(os.Args) != 2 {
 		return fmt.Errorf("usage: migrate up|down|reset|version")
 	}
-	url := os.Getenv("DATABASE_URL")
+	url := os.Getenv("DATABASE_MIGRATIONS_URL")
 	if url == "" {
-		return fmt.Errorf("DATABASE_URL not set")
+		url = os.Getenv("DATABASE_URL")
+	}
+	if url == "" {
+		return fmt.Errorf("DATABASE_MIGRATIONS_URL and DATABASE_URL not set")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)

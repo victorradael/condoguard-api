@@ -41,6 +41,7 @@ com pelo menos 32 bytes, nem com `CORS_ALLOWED_ORIGINS=*`.
 | Variável | Descrição | Padrão |
 |----------|-----------|--------|
 | `DATABASE_URL` | URL do PostgreSQL (`postgres://...`). Sem ela a API usa repositórios em memória (só para desenvolvimento). Com o banco fora do host, use `sslmode=require` ou `verify-full` | — |
+| `DATABASE_MIGRATIONS_URL` | URL do PostgreSQL com o papel dono do esquema, usada só para aplicar as migrações. Assim o papel de `DATABASE_URL` não precisa de permissão de DDL (no Postgres 15+, o `public` não aceita `CREATE` de quem não é dono) | `DATABASE_URL` |
 | `DB_MIGRATE_ON_START` | Aplica as migrações pendentes ao subir | `true` |
 | `REDIS_URL` | URL do Redis (`redis://:senha@host:6379/0`). Sem ela o limite de login fica em memória (uma instância só) | — |
 | `DEFAULT_CONDOMINIUM_ID` | Condomínio (tenant) do cadastro e do login até a entidade condomínio existir (Fase 1b). Nas rotas autenticadas o tenant vem do token | `default` |
@@ -89,7 +90,7 @@ docker compose exec -T -e ADMIN_EMAIL=sindico@exemplo.com -e ADMIN_USERNAME=sind
 ### Banco de dados
 
 - Migrações em `internal/db/migrations/` (goose, embutidas no binário).
-  `make migrate-up`, `make migrate-down`, `make migrate-reset` e `make migrate-version` usam `DATABASE_URL`.
+  `make migrate-up`, `make migrate-down`, `make migrate-reset` e `make migrate-version` usam `DATABASE_MIGRATIONS_URL` (ou `DATABASE_URL`, se ela não estiver definida).
 - Consultas em `internal/db/queries/*.sql`; o código Go é gerado em `internal/db/dbgen/` com `make sqlc` (o CI confere com `sqlc diff`).
 - Toda tabela tem `condominium_id` obrigatório e toda consulta filtra por ele. O valor vem do token (rotas autenticadas) ou do `DEFAULT_CONDOMINIUM_ID` (cadastro e login); um repositório chamado sem tenant retorna erro. O Row-Level Security entra na Fase 1b.
 - O e-mail é o login: único em toda a base, guardado normalizado (minúsculo, sem espaços). O `username` é só nome de exibição.

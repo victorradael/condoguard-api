@@ -35,6 +35,7 @@ import (
 // Config holds the infrastructure settings read from the environment.
 type Config struct {
 	DatabaseURL           string        // DATABASE_URL; empty = in-memory repositories (dev/tests only)
+	DatabaseMigrationsURL string        // DATABASE_MIGRATIONS_URL: schema owner, used only to migrate on start (default DATABASE_URL)
 	MigrateOnStart        bool          // DB_MIGRATE_ON_START (default true)
 	RedisURL              string        // REDIS_URL; empty = in-memory login limiter (single instance)
 	CondominiumID         string        // DEFAULT_CONDOMINIUM_ID (default "default") — tenant of sign-up and login until 1b
@@ -59,6 +60,7 @@ type Config struct {
 func ConfigFromEnv() (Config, error) {
 	cfg := Config{
 		DatabaseURL:           os.Getenv("DATABASE_URL"),
+		DatabaseMigrationsURL: os.Getenv("DATABASE_MIGRATIONS_URL"),
 		MigrateOnStart:        true,
 		RedisURL:              os.Getenv("REDIS_URL"),
 		CondominiumID:         os.Getenv("DEFAULT_CONDOMINIUM_ID"),
@@ -150,6 +152,21 @@ func (a *App) Close() {
 	}
 }
 
+// migrateUp applies the migrations as the schema owner when
+// DatabaseMigrationsURL is set, so the runtime role (DATABASE_URL) needs no DDL
+// rights; otherwise it reuses the application pool.
+func migrateUp(ctx context.Context, cfg Config, pool *pgxpool.Pool) error {
+	if cfg.DatabaseMigrationsURL == "" || cfg.DatabaseMigrationsURL == cfg.DatabaseURL {
+		return db.MigrateUp(ctx, pool)
+	}
+	owner, err := db.NewPool(ctx, cfg.DatabaseMigrationsURL)
+	if err != nil {
+		return fmt.Errorf("DATABASE_MIGRATIONS_URL: %w", err)
+	}
+	defer owner.Close()
+	return db.MigrateUp(ctx, owner)
+}
+
 // New connects to PostgreSQL and Redis (when configured), runs the migrations
 // and builds the HTTP handler.
 func New(ctx context.Context, cfg Config, logger *slog.Logger, metrics *middleware.Metrics) (*App, error) {
@@ -174,7 +191,7 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger, metrics *middlewa
 		}
 		a.pool = pool
 		if cfg.MigrateOnStart {
-			if err := db.MigrateUp(ctx, pool); err != nil {
+			if err := migrateUp(ctx, cfg, pool); err != nil {
 				a.Close()
 				return nil, err
 			}

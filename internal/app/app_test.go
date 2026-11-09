@@ -19,7 +19,7 @@ const testSecret = "dGVzdC1zZWNyZXQta2V5LWZvci11bml0LXRlc3RpbmctMzJi"
 // clearEnv blanks every setting and sets only the required JWT secret.
 func clearEnv(t *testing.T) {
 	for _, k := range []string{
-		"DATABASE_URL", "REDIS_URL", "DB_MIGRATE_ON_START", "DEFAULT_CONDOMINIUM_ID",
+		"DATABASE_URL", "DATABASE_MIGRATIONS_URL", "REDIS_URL", "DB_MIGRATE_ON_START", "DEFAULT_CONDOMINIUM_ID",
 		"LOGIN_MAX_ATTEMPTS", "LOGIN_MAX_ATTEMPTS_PER_IP", "LOGIN_LOCKOUT_WINDOW",
 		"REGISTER_MAX_PER_IP", "REGISTER_WINDOW",
 		"ACCESS_TOKEN_TTL", "REFRESH_TOKEN_TTL", "CORS_ALLOWED_ORIGINS",
@@ -54,11 +54,12 @@ func TestConfigFromEnv_Overrides(t *testing.T) {
 	t.Setenv("LOGIN_MAX_ATTEMPTS", "3")
 	t.Setenv("LOGIN_LOCKOUT_WINDOW", "2m")
 	t.Setenv("COOKIE_PATH_PREFIX", "/api")
+	t.Setenv("DATABASE_MIGRATIONS_URL", "postgres://owner@db/x")
 	cfg, err := app.ConfigFromEnv()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.CondominiumID != "condo-x" || cfg.MigrateOnStart || cfg.LoginMaxAttempts != 3 || cfg.LoginLockoutWindow != 2*time.Minute || cfg.CookiePathPrefix != "/api" {
+	if cfg.CondominiumID != "condo-x" || cfg.MigrateOnStart || cfg.LoginMaxAttempts != 3 || cfg.LoginLockoutWindow != 2*time.Minute || cfg.CookiePathPrefix != "/api" || cfg.DatabaseMigrationsURL != "postgres://owner@db/x" {
 		t.Errorf("unexpected config: %+v", cfg)
 	}
 }
