@@ -8,32 +8,42 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/victorradael/condoguard/api/internal/authz"
 	"github.com/victorradael/condoguard/api/internal/db/dbtest"
-	"github.com/victorradael/condoguard/api/internal/tenant"
-
 	"github.com/victorradael/condoguard/api/internal/middleware"
 	"github.com/victorradael/condoguard/api/internal/notification"
+	"github.com/victorradael/condoguard/api/internal/tenant"
 	pkgjwt "github.com/victorradael/condoguard/api/pkg/jwt"
 )
 
-const handlerSecret = "dGVzdC1zZWNyZXQta2V5LWZvci11bml0LXRlc3Rpbmc="
+const handlerSecret = "dGVzdC1zZWNyZXQta2V5LWZvci11bml0LXRlc3RpbmctMzJi"
+
+var handlerJWT = pkgjwt.MustNewService(handlerSecret)
 
 func newTestRouter(t *testing.T) http.Handler {
 	t.Helper()
-	repo := notification.NewInMemoryRepository()
-	svc := notification.NewService(repo)
-	jwtSvc := pkgjwt.NewService(handlerSecret)
-	return notification.NewHandler(svc, middleware.Authenticate(jwtSvc))
+	svc := notification.NewService(notification.NewInMemoryRepository(), testUnits)
+	return notification.NewHandler(svc, middleware.Authenticate(handlerJWT))
 }
 
-func validToken(t *testing.T) string {
+func tokenFor(t *testing.T, userID, condo string, roles ...string) string {
 	t.Helper()
-	svc := pkgjwt.NewService(handlerSecret)
-	tok, err := svc.GenerateToken("user-1", []string{"ROLE_USER"})
+	tok, err := handlerJWT.GenerateToken(userID, condo, roles)
 	if err != nil {
 		t.Fatalf("generate token: %v", err)
 	}
 	return tok
+}
+
+// validToken is an admin of testCondo (admins manage notifications).
+func validToken(t *testing.T) string {
+	t.Helper()
+	return tokenFor(t, "admin-1", testCondo, authz.RoleAdmin)
+}
+
+func userToken(t *testing.T, userID string) string {
+	t.Helper()
+	return tokenFor(t, userID, testCondo, authz.RoleUser)
 }
 
 func authReq(method, path, token string, body any) *http.Request {
@@ -51,11 +61,32 @@ func authReq(method, path, token string, body any) *http.Request {
 	return req
 }
 
+func serve(router http.Handler, method, path, token string, body any) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, authReq(method, path, token, body))
+	return rec
+}
+
+func decode[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
+	t.Helper()
+	var v T
+	if err := json.NewDecoder(rec.Body).Decode(&v); err != nil {
+		t.Fatalf("decode %q: %v", rec.Body.String(), err)
+	}
+	return v
+}
+
+type listBody struct {
+	Items    []map[string]any `json:"items"`
+	Page     int              `json:"page"`
+	PageSize int              `json:"pageSize"`
+	Total    int64            `json:"total"`
+}
+
 func createNotification(t *testing.T, router http.Handler, tok string, extra map[string]any) map[string]any {
 	t.Helper()
 	payload := map[string]any{
 		"message":     "Aviso de teste",
-		"createdById": "user-1",
 		"residentIds": []string{"r1"},
 	}
 	for k, v := range extra {
@@ -92,10 +123,9 @@ func TestNotifications_List_Empty_Returns200WithEmptyArray(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", rec.Code)
 	}
-	var list []any
-	_ = json.NewDecoder(rec.Body).Decode(&list)
-	if len(list) != 0 {
-		t.Errorf("expected empty array, got %v", list)
+	list := decode[listBody](t, rec)
+	if list.Items == nil || len(list.Items) != 0 || list.Total != 0 {
+		t.Errorf("expected empty items array, got %+v", list)
 	}
 }
 
@@ -106,7 +136,6 @@ func TestNotifications_Create_Returns201(t *testing.T) {
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, authReq(http.MethodPost, "/notifications", validToken(t), map[string]any{
 		"message":     "Reunião geral",
-		"createdById": "user-1",
 		"residentIds": []string{"r1"},
 	}))
 
@@ -130,7 +159,6 @@ func TestNotifications_Create_MissingMessage_Returns422(t *testing.T) {
 	router := newTestRouter(t)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, authReq(http.MethodPost, "/notifications", validToken(t), map[string]any{
-		"createdById": "user-1",
 		"residentIds": []string{"r1"},
 	}))
 
@@ -143,8 +171,7 @@ func TestNotifications_Create_NoRecipients_Returns422(t *testing.T) {
 	router := newTestRouter(t)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, authReq(http.MethodPost, "/notifications", validToken(t), map[string]any{
-		"message":     "Aviso",
-		"createdById": "user-1",
+		"message": "Aviso",
 	}))
 
 	if rec.Code != http.StatusUnprocessableEntity {
@@ -300,17 +327,34 @@ func TestNotifications_MarkAsRead_NonExistent_Returns404(t *testing.T) {
 
 func TestIntegration_Notifications_CRUD(t *testing.T) {
 	pool := dbtest.NewPool(t)
-	router := tenant.Middleware("condo-test")(notification.NewHandler(notification.NewService(notification.NewPostgresRepository(pool)), middleware.Authenticate(pkgjwt.NewService(handlerSecret))))
+	const condo = "condo-test"
+	admin := saveUser(t, pool, condo, "admin", authz.RoleAdmin)
+	router := tenant.Middleware("deployment-default")(notification.NewHandler(
+		notification.NewService(notification.NewPostgresRepository(pool), testUnits),
+		middleware.Authenticate(handlerJWT)))
+	tok := tokenFor(t, admin, condo, authz.RoleAdmin)
 
-	crudRoundTrip(t, router, validToken(t), "/notifications",
-		map[string]any{"message": "Aviso", "createdById": "user-1", "residentIds": []string{"r1"}},
+	crudRoundTrip(t, router, tok, "/notifications",
+		map[string]any{"message": "Aviso", "residentIds": []string{"r1"}, "createdById": "someone-else"},
 		map[string]any{"message": "Aviso atualizado"},
-		func(_, updated map[string]any) {
+		func(created, updated map[string]any) {
+			if created["createdById"] != admin || updated["createdById"] != admin {
+				t.Errorf("createdById must be the token user %q: created=%v updated=%v", admin, created["createdById"], updated["createdById"])
+			}
 			if updated["message"] != "Aviso atualizado" {
 				t.Errorf("update not persisted: %v", updated)
 			}
 			if ids, _ := updated["shopOwnerIds"].([]any); ids == nil {
 				t.Errorf("shopOwnerIds must be an empty array, got %v", updated["shopOwnerIds"])
+			}
+			// mark read through the handler (needs a real user for the FK)
+			id, _ := created["id"].(string)
+			rec := serve(router, http.MethodPut, "/notifications/"+id+"/read", tok, nil)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("mark read: expected 200, got %d — %s", rec.Code, rec.Body.String())
+			}
+			if n := decode[map[string]any](t, rec); n["read"] != true || n["readAt"] == nil {
+				t.Errorf("mark read: %v", n)
 			}
 		})
 }
@@ -342,10 +386,10 @@ func crudRoundTrip(t *testing.T, router http.Handler, tok, base string, create, 
 	if rec = do(http.MethodGet, base, nil); rec.Code != http.StatusOK {
 		t.Fatalf("list: expected 200, got %d", rec.Code)
 	}
-	var list []map[string]any
+	var list listBody
 	_ = json.NewDecoder(rec.Body).Decode(&list)
-	if len(list) != 1 {
-		t.Fatalf("list: expected 1 item, got %d", len(list))
+	if len(list.Items) != 1 || list.Total != 1 {
+		t.Fatalf("list: expected 1 item, got %d (total %d)", len(list.Items), list.Total)
 	}
 
 	rec = do(http.MethodPut, base+"/"+id, update)
@@ -364,5 +408,156 @@ func crudRoundTrip(t *testing.T, router http.Handler, tok, base string, create, 
 	}
 	if rec = do(http.MethodGet, base+"/"+id, nil); rec.Code != http.StatusNotFound {
 		t.Fatalf("get after delete: expected 404, got %d", rec.Code)
+	}
+}
+
+// ── Security ──────────────────────────────────────────────────────────────────
+
+func TestHandler_Security_CreatedByIDComesFromToken(t *testing.T) {
+	router := newTestRouter(t)
+	tok := validToken(t)
+
+	n := createNotification(t, router, tok, map[string]any{"createdById": "someone-else"})
+	if n["createdById"] != "admin-1" {
+		t.Errorf("create response: createdById must be the token user, got %v", n["createdById"])
+	}
+	rec := serve(router, http.MethodGet, fmt.Sprintf("/notifications/%v", n["id"]), tok, nil)
+	if got := decode[map[string]any](t, rec); got["createdById"] != "admin-1" {
+		t.Errorf("stored createdById must be the token user, got %v", got["createdById"])
+	}
+}
+
+func TestHandler_Security_ReadStateIsPerRecipient(t *testing.T) {
+	router := newTestRouter(t)
+	n := createNotification(t, router, validToken(t), nil) // addressed to r1
+	path := fmt.Sprintf("/notifications/%v", n["id"])
+	tokA, tokB := userToken(t, "res-1"), userToken(t, "res-2") // both live in r1
+
+	rec := serve(router, http.MethodPut, path+"/read", tokA, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("A mark read: expected 200, got %d — %s", rec.Code, rec.Body.String())
+	}
+	first := decode[map[string]any](t, rec)
+	if first["read"] != true || first["readAt"] == nil {
+		t.Fatalf("A mark read: %v", first)
+	}
+
+	if got := decode[map[string]any](t, serve(router, http.MethodGet, path, tokA, nil)); got["read"] != true || got["readAt"] != first["readAt"] {
+		t.Errorf("A must see read=true with the same readAt: %v", got)
+	}
+	if got := decode[map[string]any](t, serve(router, http.MethodGet, path, tokB, nil)); got["read"] != false || got["readAt"] != nil {
+		t.Errorf("B must still see read=false: %v", got)
+	}
+	list := decode[listBody](t, serve(router, http.MethodGet, "/notifications", tokB, nil))
+	if len(list.Items) != 1 || list.Items[0]["read"] != false {
+		t.Errorf("B list must show unread: %+v", list)
+	}
+
+	// idempotent: A marks again, readAt unchanged
+	again := decode[map[string]any](t, serve(router, http.MethodPut, path+"/read", tokA, nil))
+	if again["read"] != true || again["readAt"] != first["readAt"] {
+		t.Errorf("idempotent mark read changed readAt: first=%v again=%v", first["readAt"], again["readAt"])
+	}
+}
+
+func TestHandler_Security_UserCannotManage_Returns403(t *testing.T) {
+	router := newTestRouter(t)
+	n := createNotification(t, router, validToken(t), nil)
+	path := fmt.Sprintf("/notifications/%v", n["id"])
+	tok := userToken(t, "res-1") // a recipient, but not an admin
+
+	if rec := serve(router, http.MethodPost, "/notifications", tok, map[string]any{"message": "X", "residentIds": []string{"r1"}}); rec.Code != http.StatusForbidden {
+		t.Errorf("create: expected 403, got %d", rec.Code)
+	}
+	if rec := serve(router, http.MethodPut, path, tok, map[string]any{"message": "X"}); rec.Code != http.StatusForbidden {
+		t.Errorf("update: expected 403, got %d", rec.Code)
+	}
+	if rec := serve(router, http.MethodDelete, path, tok, nil); rec.Code != http.StatusForbidden {
+		t.Errorf("delete: expected 403, got %d", rec.Code)
+	}
+	got := decode[map[string]any](t, serve(router, http.MethodGet, path, validToken(t), nil))
+	if got["message"] != "Aviso de teste" {
+		t.Errorf("notification must be untouched, got %v", got)
+	}
+}
+
+func TestHandler_Security_UserNotAddressed_Returns404(t *testing.T) {
+	router := newTestRouter(t)
+	n := createNotification(t, router, validToken(t), nil) // addressed to r1
+	path := fmt.Sprintf("/notifications/%v", n["id"])
+	tok := userToken(t, "outsider") // owns r9
+
+	if rec := serve(router, http.MethodGet, path, tok, nil); rec.Code != http.StatusNotFound {
+		t.Errorf("get: expected 404, got %d", rec.Code)
+	}
+	if rec := serve(router, http.MethodPut, path+"/read", tok, nil); rec.Code != http.StatusNotFound {
+		t.Errorf("mark read: expected 404, got %d", rec.Code)
+	}
+	rec := serve(router, http.MethodGet, "/notifications", tok, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list: expected 200, got %d", rec.Code)
+	}
+	if list := decode[listBody](t, rec); len(list.Items) != 0 || list.Total != 0 {
+		t.Errorf("list: notification must be absent, got %+v", list)
+	}
+
+	// an addressed user does see it
+	if rec := serve(router, http.MethodGet, path, userToken(t, "res-1"), nil); rec.Code != http.StatusOK {
+		t.Errorf("addressed user get: expected 200, got %d", rec.Code)
+	}
+}
+
+func TestHandler_Security_OtherCondominium_Returns404EvenForAdmin(t *testing.T) {
+	router := newTestRouter(t)
+	n := createNotification(t, router, validToken(t), nil)
+	path := fmt.Sprintf("/notifications/%v", n["id"])
+	other := tokenFor(t, "admin-b", "condo-b", authz.RoleAdmin)
+
+	for _, c := range []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodGet, path, nil},
+		{http.MethodPut, path, map[string]any{"message": "X"}},
+		{http.MethodPut, path + "/read", nil},
+		{http.MethodDelete, path, nil},
+	} {
+		if rec := serve(router, c.method, c.path, other, c.body); rec.Code != http.StatusNotFound {
+			t.Errorf("%s %s: expected 404, got %d", c.method, c.path, rec.Code)
+		}
+	}
+	if list := decode[listBody](t, serve(router, http.MethodGet, "/notifications", other, nil)); len(list.Items) != 0 || list.Total != 0 {
+		t.Errorf("list: expected empty, got %+v", list)
+	}
+	if got := decode[map[string]any](t, serve(router, http.MethodGet, path, validToken(t), nil)); got["message"] != "Aviso de teste" {
+		t.Errorf("notification must be untouched, got %v", got)
+	}
+}
+
+func TestHandler_Pagination(t *testing.T) {
+	router := newTestRouter(t)
+	tok := validToken(t)
+	for i := range 3 {
+		createNotification(t, router, tok, map[string]any{"message": fmt.Sprintf("Aviso %d", i)})
+	}
+
+	rec := serve(router, http.MethodGet, "/notifications?page=2&pageSize=2", tok, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	list := decode[listBody](t, rec)
+	if list.Page != 2 || list.PageSize != 2 || list.Total != 3 || len(list.Items) != 1 {
+		t.Errorf("unexpected page: %+v", list)
+	}
+
+	def := decode[listBody](t, serve(router, http.MethodGet, "/notifications", tok, nil))
+	if def.Page != 1 || def.PageSize != 20 || def.Total != 3 || len(def.Items) != 3 {
+		t.Errorf("default page: %+v", def)
+	}
+
+	for _, q := range []string{"page=0", "page=x", "pageSize=0", "pageSize=101", "pageSize=-1"} {
+		if rec := serve(router, http.MethodGet, "/notifications?"+q, tok, nil); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: expected 400, got %d", q, rec.Code)
+		}
 	}
 }

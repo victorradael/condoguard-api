@@ -4,24 +4,44 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/victorradael/condoguard/api/internal/middleware"
+	"github.com/victorradael/condoguard/api/pkg/page"
 )
 
-// NewHandler wires the user CRUD routes behind the provided auth middleware.
-// All routes require ROLE_ADMIN.
+// NewHandler wires the user routes behind the provided auth middleware.
+// GET /users/me is open to any authenticated user; every other route
+// requires ROLE_ADMIN.
 func NewHandler(svc *Service, authMW func(http.Handler) http.Handler) http.Handler {
 	h := &handler{svc: svc}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /users", h.list)
-	mux.HandleFunc("POST /users", h.create)
-	mux.HandleFunc("GET /users/{id}", h.getByID)
-	mux.HandleFunc("PUT /users/{id}", h.update)
-	mux.HandleFunc("DELETE /users/{id}", h.delete)
+	admin := http.NewServeMux()
+	admin.HandleFunc("GET /users", h.list)
+	admin.HandleFunc("POST /users", h.create)
+	admin.HandleFunc("GET /users/{id}", h.getByID)
+	admin.HandleFunc("PUT /users/{id}", h.update)
+	admin.HandleFunc("DELETE /users/{id}", h.delete)
 
-	return authMW(requireAdmin(mux))
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /users/me", h.me)
+	mux.Handle("/", requireAdmin(admin))
+
+	return authMW(mux)
+}
+
+// me returns the authenticated user's own account (id, username, email, roles).
+func (h *handler) me(w http.ResponseWriter, r *http.Request) {
+	u, err := h.svc.GetByID(r.Context(), middleware.UserIDFromContext(r.Context()))
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			// The token outlived the account.
+			writeError(w, http.StatusUnauthorized, "user no longer exists")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
 }
 
 type handler struct {
@@ -44,7 +64,12 @@ func requireAdmin(next http.Handler) http.Handler {
 }
 
 func (h *handler) list(w http.ResponseWriter, r *http.Request) {
-	users, err := h.svc.List(r.Context())
+	p, err := page.FromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	users, err := h.svc.List(r.Context(), p)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -75,7 +100,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) getByID(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.PathValue("id"), "")
+	id := r.PathValue("id")
 	u, err := h.svc.GetByID(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -98,11 +123,14 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request) {
 
 	u, err := h.svc.Update(r.Context(), id, req)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
+		switch {
+		case errors.Is(err, ErrNotFound):
 			writeError(w, http.StatusNotFound, "user not found")
-			return
+		case errors.Is(err, ErrValidation):
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "internal error")
 		}
-		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	writeJSON(w, http.StatusOK, u)

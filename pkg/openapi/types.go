@@ -85,6 +85,10 @@ type Schema struct {
 	Enum        []any              `json:"enum,omitempty"`
 	Example     any                `json:"example,omitempty"`
 	Nullable    bool               `json:"nullable,omitempty"`
+	Minimum     *float64           `json:"minimum,omitempty"`
+	Maximum     *float64           `json:"maximum,omitempty"`
+	MinLength   *int               `json:"minLength,omitempty"`
+	MaxLength   *int               `json:"maxLength,omitempty"`
 }
 
 type Components struct {
@@ -96,6 +100,8 @@ type SecurityScheme struct {
 	Type         string `json:"type"`
 	Scheme       string `json:"scheme,omitempty"`
 	BearerFormat string `json:"bearerFormat,omitempty"`
+	In           string `json:"in,omitempty"`   // apiKey only: header | query | cookie
+	Name         string `json:"name,omitempty"` // apiKey only
 	Description  string `json:"description,omitempty"`
 }
 
@@ -131,12 +137,10 @@ func jsonResp(description, schemaName string) *Response {
 	return r
 }
 
-// jsonArrayResp returns a response whose body is an array of the named schema.
-func jsonArrayResp(description, schemaName string) *Response {
-	return &Response{
-		Description: description,
-		Content:     map[string]MediaType{"application/json": {Schema: arrayOf(schemaName)}},
-	}
+// jsonPageResp returns a paginated list response of the named schema
+// (component "<schemaName>Page").
+func jsonPageResp(description, schemaName string) *Response {
+	return jsonResp(description, schemaName+"Page")
 }
 
 // errResp returns a response using the generic Error schema.
@@ -149,8 +153,31 @@ func noContentResp() *Response {
 	return &Response{Description: "No content"}
 }
 
-// bearerSecurity is the security requirement for JWT-protected routes.
-var bearerSecurity = []SecurityRequirement{{"bearerAuth": []string{}}}
+// bearerSecurity is the security requirement for JWT-protected routes:
+// the access token as a bearer header (app) or in the httpOnly cookie (web).
+var bearerSecurity = []SecurityRequirement{{"bearerAuth": []string{}}, {"cookieAuth": []string{}}}
+
+// pageParams are the pagination query parameters of every list endpoint.
+var pageParams = []Parameter{
+	{Name: "page", In: "query", Description: "Página (começa em 1)", Schema: &Schema{Type: "integer", Minimum: ptr(1.0)}},
+	{Name: "pageSize", In: "query", Description: "Itens por página (1 a 100, padrão 20)", Schema: &Schema{Type: "integer", Minimum: ptr(1.0), Maximum: ptr(100.0)}},
+}
+
+func ptr[T any](v T) *T { return &v }
+
+// pageSchema is the list envelope {items, page, pageSize, total} of itemSchema.
+func pageSchema(itemSchema string) *Schema {
+	return &Schema{
+		Type: "object",
+		Properties: map[string]*Schema{
+			"items":    arrayOf(itemSchema),
+			"page":     {Type: "integer", Description: "Página atual"},
+			"pageSize": {Type: "integer", Description: "Itens por página"},
+			"total":    {Type: "integer", Format: "int64", Description: "Total de itens em todas as páginas"},
+		},
+		Required: []string{"items", "page", "pageSize", "total"},
+	}
+}
 
 // pathParam builds a required path parameter schema.
 func pathParam(name, description string) Parameter {

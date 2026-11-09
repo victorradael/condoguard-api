@@ -4,19 +4,28 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+
+	"github.com/victorradael/condoguard/api/internal/authz"
+	"github.com/victorradael/condoguard/api/pkg/page"
 )
 
+// Prefixes the routes are served under. /shop-owners is the canonical path
+// (the one the web client uses); /shopOwners is kept for older clients.
+var Prefixes = []string{"/shop-owners", "/shopOwners"}
+
 // NewHandler wires the shopowner CRUD routes behind the provided auth middleware.
-// Any authenticated user may access these routes.
+// Admins manage all shops; other users only read their own (see Service).
 func NewHandler(svc *Service, authMW func(http.Handler) http.Handler) http.Handler {
 	h := &handler{svc: svc}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /shopOwners", h.list)
-	mux.HandleFunc("POST /shopOwners", h.create)
-	mux.HandleFunc("GET /shopOwners/{id}", h.getByID)
-	mux.HandleFunc("PUT /shopOwners/{id}", h.update)
-	mux.HandleFunc("DELETE /shopOwners/{id}", h.delete)
+	for _, p := range Prefixes {
+		mux.HandleFunc("GET "+p, h.list)
+		mux.HandleFunc("POST "+p, h.create)
+		mux.HandleFunc("GET "+p+"/{id}", h.getByID)
+		mux.HandleFunc("PUT "+p+"/{id}", h.update)
+		mux.HandleFunc("DELETE "+p+"/{id}", h.delete)
+	}
 
 	return authMW(mux)
 }
@@ -26,9 +35,14 @@ type handler struct {
 }
 
 func (h *handler) list(w http.ResponseWriter, r *http.Request) {
-	list, err := h.svc.List(r.Context())
+	p, err := page.FromRequest(r)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	list, err := h.svc.List(r.Context(), p)
+	if err != nil {
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
@@ -49,7 +63,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, ErrDuplicate):
 			writeError(w, http.StatusConflict, "CNPJ already registered")
 		default:
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeServiceError(w, err)
 		}
 		return
 	}
@@ -64,7 +78,7 @@ func (h *handler) getByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "shopowner not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, shop)
@@ -88,7 +102,7 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, shop)
@@ -101,10 +115,19 @@ func (h *handler) delete(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "shopowner not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeServiceError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeServiceError answers 401/403 for authorization errors and 500 otherwise.
+func writeServiceError(w http.ResponseWriter, err error) {
+	if status, msg, ok := authz.Status(err); ok {
+		writeError(w, status, msg)
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "internal error")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

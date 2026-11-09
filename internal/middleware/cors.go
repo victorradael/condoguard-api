@@ -2,44 +2,35 @@ package middleware
 
 import (
 	"net/http"
-	"os"
-	"strings"
 )
 
-// CORS returns a middleware that handles cross-origin requests.
-// Allowed origins are read from the CORS_ALLOWED_ORIGINS environment variable
-// (comma-separated). If not set, defaults to http://localhost:3000.
-// In all cases "*" can be used to allow any origin.
-func CORS(next http.Handler) http.Handler {
-	raw := os.Getenv("CORS_ALLOWED_ORIGINS")
-	if raw == "" {
-		raw = "http://localhost:3000"
+// CORS returns a middleware that answers cross-origin requests from the
+// allowed origins only (see ParseOrigins). Credentials are allowed, so the
+// origin is always echoed exactly, never as "*".
+func CORS(allowed []string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Add("Vary", "Origin")
+			ok := originAllowed(r, allowed)
+			if ok {
+				w.Header().Set("Access-Control-Allow-Origin", r.Header.Get("Origin"))
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			}
+
+			// Preflight
+			if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
+				if !ok {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-ID")
+				w.Header().Set("Access-Control-Max-Age", "600")
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
 	}
-
-	allowed := make(map[string]bool)
-	for _, o := range strings.Split(raw, ",") {
-		allowed[strings.TrimSpace(o)] = true
-	}
-	allowAll := allowed["*"]
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-
-		if origin != "" && (allowAll || allowed[origin]) {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Vary", "Origin")
-		}
-
-		// Handle preflight
-		if r.Method == http.MethodOptions {
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-ID")
-			w.Header().Set("Access-Control-Max-Age", "86400")
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
 }

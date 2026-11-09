@@ -10,6 +10,7 @@ import (
 	"github.com/victorradael/condoguard/api/internal/db"
 	"github.com/victorradael/condoguard/api/internal/db/dbgen"
 	"github.com/victorradael/condoguard/api/internal/tenant"
+	"github.com/victorradael/condoguard/api/pkg/page"
 )
 
 type postgresRepository struct {
@@ -67,20 +68,46 @@ func (r *postgresRepository) FindByID(ctx context.Context, id string) (*ShopOwne
 	return fromRow(row), nil
 }
 
-func (r *postgresRepository) FindAll(ctx context.Context) ([]*ShopOwner, error) {
+func (r *postgresRepository) FindAll(ctx context.Context, ownerID string, p page.Params) ([]*ShopOwner, int64, error) {
 	condoID, err := tenant.CondominiumID(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	rows, err := r.q.ListShopOwners(ctx, condoID)
+	var owner *string
+	if ownerID != "" {
+		owner = &ownerID
+	}
+	rows, err := r.q.ListShopOwners(ctx, dbgen.ListShopOwnersParams{
+		CondominiumID: condoID, OwnerID: owner, PageLimit: p.Limit(), PageOffset: p.Offset(),
+	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
+	}
+	total, err := r.q.CountShopOwners(ctx, dbgen.CountShopOwnersParams{CondominiumID: condoID, OwnerID: owner})
+	if err != nil {
+		return nil, 0, err
 	}
 	list := make([]*ShopOwner, 0, len(rows))
 	for _, row := range rows {
 		list = append(list, fromRow(row))
 	}
-	return list, nil
+	return list, total, nil
+}
+
+func (r *postgresRepository) IDsByOwner(ctx context.Context, ownerID string) ([]string, error) {
+	condoID, err := tenant.CondominiumID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids, err := r.q.ListShopOwnerIDsByOwner(ctx, dbgen.ListShopOwnerIDsByOwnerParams{CondominiumID: condoID, OwnerID: ownerID})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = id.String()
+	}
+	return out, nil
 }
 
 func (r *postgresRepository) Update(ctx context.Context, s *ShopOwner) error {

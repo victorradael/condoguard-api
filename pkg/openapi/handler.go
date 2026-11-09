@@ -25,7 +25,7 @@ func Handler() http.Handler {
 		})
 
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Header().Set("Cache-Control", "no-store") // admin-only: never in shared caches
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(specJSON)
 	})

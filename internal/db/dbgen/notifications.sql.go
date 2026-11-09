@@ -12,6 +12,34 @@ import (
 	"github.com/google/uuid"
 )
 
+const countNotifications = `-- name: CountNotifications :one
+SELECT count(*)
+FROM notifications n
+WHERE n.condominium_id = $1
+  AND (NOT $2::boolean
+       OR n.resident_ids && $3::text[]
+       OR n.shop_owner_ids && $4::text[])
+`
+
+type CountNotificationsParams struct {
+	CondominiumID string
+	Restricted    bool
+	ResidentIds   []string
+	ShopOwnerIds  []string
+}
+
+func (q *Queries) CountNotifications(ctx context.Context, arg CountNotificationsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countNotifications,
+		arg.CondominiumID,
+		arg.Restricted,
+		arg.ResidentIds,
+		arg.ShopOwnerIds,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteNotification = `-- name: DeleteNotification :execrows
 DELETE FROM notifications
 WHERE condominium_id = $1 AND id = $2
@@ -31,36 +59,51 @@ func (q *Queries) DeleteNotification(ctx context.Context, arg DeleteNotification
 }
 
 const getNotificationByID = `-- name: GetNotificationByID :one
-SELECT id, condominium_id, message, created_by_id, created_at, read, read_at, resident_ids, shop_owner_ids
-FROM notifications
-WHERE condominium_id = $1 AND id = $2
+SELECT n.id, n.condominium_id, n.message, n.created_by_id, n.created_at, n.resident_ids, n.shop_owner_ids,
+       r.read_at
+FROM notifications n
+LEFT JOIN notification_reads r
+       ON r.notification_id = n.id AND r.user_id = $1::uuid
+WHERE n.condominium_id = $2 AND n.id = $3
 `
 
 type GetNotificationByIDParams struct {
+	ReaderID      *uuid.UUID
 	CondominiumID string
 	ID            uuid.UUID
 }
 
-func (q *Queries) GetNotificationByID(ctx context.Context, arg GetNotificationByIDParams) (Notification, error) {
-	row := q.db.QueryRow(ctx, getNotificationByID, arg.CondominiumID, arg.ID)
-	var i Notification
+type GetNotificationByIDRow struct {
+	ID            uuid.UUID
+	CondominiumID string
+	Message       string
+	CreatedByID   string
+	CreatedAt     time.Time
+	ResidentIds   []string
+	ShopOwnerIds  []string
+	ReadAt        *time.Time
+}
+
+// read_at é a leitura do usuário informado (NULL = não lida por ele).
+func (q *Queries) GetNotificationByID(ctx context.Context, arg GetNotificationByIDParams) (GetNotificationByIDRow, error) {
+	row := q.db.QueryRow(ctx, getNotificationByID, arg.ReaderID, arg.CondominiumID, arg.ID)
+	var i GetNotificationByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.CondominiumID,
 		&i.Message,
 		&i.CreatedByID,
 		&i.CreatedAt,
-		&i.Read,
-		&i.ReadAt,
 		&i.ResidentIds,
 		&i.ShopOwnerIds,
+		&i.ReadAt,
 	)
 	return i, err
 }
 
 const insertNotification = `-- name: InsertNotification :one
-INSERT INTO notifications (condominium_id, message, created_by_id, created_at, read, read_at, resident_ids, shop_owner_ids)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO notifications (condominium_id, message, created_by_id, created_at, resident_ids, shop_owner_ids)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id
 `
 
@@ -69,8 +112,6 @@ type InsertNotificationParams struct {
 	Message       string
 	CreatedByID   string
 	CreatedAt     time.Time
-	Read          bool
-	ReadAt        *time.Time
 	ResidentIds   []string
 	ShopOwnerIds  []string
 }
@@ -81,8 +122,6 @@ func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotification
 		arg.Message,
 		arg.CreatedByID,
 		arg.CreatedAt,
-		arg.Read,
-		arg.ReadAt,
 		arg.ResidentIds,
 		arg.ShopOwnerIds,
 	)
@@ -92,31 +131,68 @@ func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotification
 }
 
 const listNotifications = `-- name: ListNotifications :many
-SELECT id, condominium_id, message, created_by_id, created_at, read, read_at, resident_ids, shop_owner_ids
-FROM notifications
-WHERE condominium_id = $1
-ORDER BY created_at DESC, id
+SELECT n.id, n.condominium_id, n.message, n.created_by_id, n.created_at, n.resident_ids, n.shop_owner_ids,
+       r.read_at
+FROM notifications n
+LEFT JOIN notification_reads r
+       ON r.notification_id = n.id AND r.user_id = $1::uuid
+WHERE n.condominium_id = $2
+  AND (NOT $3::boolean
+       OR n.resident_ids && $4::text[]
+       OR n.shop_owner_ids && $5::text[])
+ORDER BY n.created_at DESC, n.id
+LIMIT $7 OFFSET $6
 `
 
-func (q *Queries) ListNotifications(ctx context.Context, condominiumID string) ([]Notification, error) {
-	rows, err := q.db.Query(ctx, listNotifications, condominiumID)
+type ListNotificationsParams struct {
+	ReaderID      *uuid.UUID
+	CondominiumID string
+	Restricted    bool
+	ResidentIds   []string
+	ShopOwnerIds  []string
+	PageOffset    int32
+	PageLimit     int32
+}
+
+type ListNotificationsRow struct {
+	ID            uuid.UUID
+	CondominiumID string
+	Message       string
+	CreatedByID   string
+	CreatedAt     time.Time
+	ResidentIds   []string
+	ShopOwnerIds  []string
+	ReadAt        *time.Time
+}
+
+// restricted = false lista tudo (administração); true só as endereçadas às
+// unidades e lojas informadas (as do próprio usuário).
+func (q *Queries) ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]ListNotificationsRow, error) {
+	rows, err := q.db.Query(ctx, listNotifications,
+		arg.ReaderID,
+		arg.CondominiumID,
+		arg.Restricted,
+		arg.ResidentIds,
+		arg.ShopOwnerIds,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Notification
+	var items []ListNotificationsRow
 	for rows.Next() {
-		var i Notification
+		var i ListNotificationsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.CondominiumID,
 			&i.Message,
 			&i.CreatedByID,
 			&i.CreatedAt,
-			&i.Read,
-			&i.ReadAt,
 			&i.ResidentIds,
 			&i.ShopOwnerIds,
+			&i.ReadAt,
 		); err != nil {
 			return nil, err
 		}
@@ -128,18 +204,44 @@ func (q *Queries) ListNotifications(ctx context.Context, condominiumID string) (
 	return items, nil
 }
 
+const markNotificationRead = `-- name: MarkNotificationRead :one
+WITH ins AS (
+    INSERT INTO notification_reads (notification_id, user_id, condominium_id)
+    SELECT n.id, $1, n.condominium_id
+    FROM notifications n
+    WHERE n.condominium_id = $2 AND n.id = $3
+    ON CONFLICT (notification_id, user_id) DO NOTHING
+    RETURNING read_at
+)
+SELECT read_at FROM ins
+UNION ALL
+SELECT r.read_at FROM notification_reads r
+WHERE r.notification_id = $3 AND r.user_id = $1 AND r.condominium_id = $2
+LIMIT 1
+`
+
+type MarkNotificationReadParams struct {
+	UserID         uuid.UUID
+	CondominiumID  string
+	NotificationID uuid.UUID
+}
+
+// Idempotente: a primeira leitura vale; as seguintes não mudam read_at.
+func (q *Queries) MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, markNotificationRead, arg.UserID, arg.CondominiumID, arg.NotificationID)
+	var read_at time.Time
+	err := row.Scan(&read_at)
+	return read_at, err
+}
+
 const updateNotification = `-- name: UpdateNotification :execrows
 UPDATE notifications
-SET message = $1, created_by_id = $2, read = $3, read_at = $4,
-    resident_ids = $5, shop_owner_ids = $6
-WHERE condominium_id = $7 AND id = $8
+SET message = $1, resident_ids = $2, shop_owner_ids = $3
+WHERE condominium_id = $4 AND id = $5
 `
 
 type UpdateNotificationParams struct {
 	Message       string
-	CreatedByID   string
-	Read          bool
-	ReadAt        *time.Time
 	ResidentIds   []string
 	ShopOwnerIds  []string
 	CondominiumID string
@@ -149,9 +251,6 @@ type UpdateNotificationParams struct {
 func (q *Queries) UpdateNotification(ctx context.Context, arg UpdateNotificationParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateNotification,
 		arg.Message,
-		arg.CreatedByID,
-		arg.Read,
-		arg.ReadAt,
 		arg.ResidentIds,
 		arg.ShopOwnerIds,
 		arg.CondominiumID,

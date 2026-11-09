@@ -8,6 +8,7 @@ type User struct {
 	Email    string   `json:"email"`
 	Password string   `json:"-"`
 	Roles    []string `json:"roles"`
+	seq      int      // insertion order, in-memory repository only
 }
 
 // CreateRequest is the payload for POST /users.

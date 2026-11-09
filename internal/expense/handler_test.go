@@ -8,32 +8,53 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/victorradael/condoguard/api/internal/authz"
 	"github.com/victorradael/condoguard/api/internal/db/dbtest"
-	"github.com/victorradael/condoguard/api/internal/tenant"
-
 	"github.com/victorradael/condoguard/api/internal/expense"
 	"github.com/victorradael/condoguard/api/internal/middleware"
 	pkgjwt "github.com/victorradael/condoguard/api/pkg/jwt"
 )
 
-const handlerSecret = "dGVzdC1zZWNyZXQta2V5LWZvci11bml0LXRlc3Rpbmc="
+const handlerSecret = "dGVzdC1zZWNyZXQta2V5LWZvci11bml0LXRlc3RpbmctMzJi"
+
+var handlerJWT = pkgjwt.MustNewService(handlerSecret)
 
 func newTestRouter(t *testing.T) http.Handler {
 	t.Helper()
-	repo := expense.NewInMemoryRepository()
-	svc := expense.NewService(repo)
-	jwtSvc := pkgjwt.NewService(handlerSecret)
-	return expense.NewHandler(svc, middleware.Authenticate(jwtSvc))
+	svc := expense.NewService(expense.NewInMemoryRepository(), testUnits)
+	return expense.NewHandler(svc, middleware.Authenticate(handlerJWT))
 }
 
-func validToken(t *testing.T) string {
+// tokenFor issues a token for userID in condoID; the token's condominium is the tenant.
+func tokenFor(t *testing.T, userID, condoID string, roles ...string) string {
 	t.Helper()
-	svc := pkgjwt.NewService(handlerSecret)
-	tok, err := svc.GenerateToken("user-1", []string{"ROLE_USER"})
+	tok, err := handlerJWT.GenerateToken(userID, condoID, roles)
 	if err != nil {
 		t.Fatalf("generate token: %v", err)
 	}
 	return tok
+}
+
+// validToken is an admin of condo-a (expense management is admin-only).
+func validToken(t *testing.T) string {
+	t.Helper()
+	return tokenFor(t, "admin-1", "condo-a", authz.RoleAdmin)
+}
+
+type listBody struct {
+	Items    []map[string]any `json:"items"`
+	Page     int              `json:"page"`
+	PageSize int              `json:"pageSize"`
+	Total    int64            `json:"total"`
+}
+
+func decodeList(t *testing.T, rec *httptest.ResponseRecorder) listBody {
+	t.Helper()
+	var b listBody
+	if err := json.NewDecoder(rec.Body).Decode(&b); err != nil {
+		t.Fatalf("decode list: %v — %s", err, rec.Body.String())
+	}
+	return b
 }
 
 func authReq(method, path, token string, body any) *http.Request {
@@ -93,10 +114,9 @@ func TestExpenses_List_Empty_Returns200WithEmptyArray(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", rec.Code)
 	}
-	var list []any
-	_ = json.NewDecoder(rec.Body).Decode(&list)
-	if len(list) != 0 {
-		t.Errorf("expected empty array, got %v", list)
+	b := decodeList(t, rec)
+	if b.Items == nil || len(b.Items) != 0 || b.Total != 0 || b.Page != 1 || b.PageSize != 20 {
+		t.Errorf("expected empty page with defaults, got %+v", b)
 	}
 }
 
@@ -114,10 +134,8 @@ func TestExpenses_List_FilterByDateRange_Returns200(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d — %s", rec.Code, rec.Body.String())
 	}
-	var list []any
-	_ = json.NewDecoder(rec.Body).Decode(&list)
-	if len(list) != 1 {
-		t.Errorf("expected 1 expense in filter range, got %d", len(list))
+	if b := decodeList(t, rec); len(b.Items) != 1 || b.Total != 1 {
+		t.Errorf("expected 1 expense in filter range, got %+v", b)
 	}
 }
 
@@ -308,7 +326,7 @@ func TestExpenses_Delete_NonExistent_Returns404(t *testing.T) {
 
 func TestIntegration_Expenses_CRUD(t *testing.T) {
 	pool := dbtest.NewPool(t)
-	router := tenant.Middleware("condo-test")(expense.NewHandler(expense.NewService(expense.NewPostgresRepository(pool)), middleware.Authenticate(pkgjwt.NewService(handlerSecret))))
+	router := expense.NewHandler(expense.NewService(expense.NewPostgresRepository(pool), testUnits), middleware.Authenticate(handlerJWT))
 
 	crudRoundTrip(t, router, validToken(t), "/expenses",
 		map[string]any{"description": "Taxa", "amountCents": 15000, "dueDate": "2026-03-31T00:00:00Z", "residentId": "resident-1"},
@@ -350,10 +368,8 @@ func crudRoundTrip(t *testing.T, router http.Handler, tok, base string, create, 
 	if rec = do(http.MethodGet, base, nil); rec.Code != http.StatusOK {
 		t.Fatalf("list: expected 200, got %d", rec.Code)
 	}
-	var list []map[string]any
-	_ = json.NewDecoder(rec.Body).Decode(&list)
-	if len(list) != 1 {
-		t.Fatalf("list: expected 1 item, got %d", len(list))
+	if b := decodeList(t, rec); len(b.Items) != 1 || b.Total != 1 {
+		t.Fatalf("list: expected 1 item, got %+v", b)
 	}
 
 	rec = do(http.MethodPut, base+"/"+id, update)
@@ -372,5 +388,197 @@ func crudRoundTrip(t *testing.T, router http.Handler, tok, base string, create, 
 	}
 	if rec = do(http.MethodGet, base+"/"+id, nil); rec.Code != http.StatusNotFound {
 		t.Fatalf("get after delete: expected 404, got %d", rec.Code)
+	}
+}
+
+// ── Security ──────────────────────────────────────────────────────────────────
+
+func serve(router http.Handler, method, path, tok string, body any) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, authReq(method, path, tok, body))
+	return rec
+}
+
+func TestHandler_Security_InvalidToken_Returns401(t *testing.T) {
+	router := newTestRouter(t)
+	other := pkgjwt.MustNewService("b3RoZXItc2VjcmV0LWtleS1mb3ItdW5pdC10ZXN0aW5nLTMyYg==")
+	forged, _ := other.GenerateToken("admin-1", "condo-a", []string{authz.RoleAdmin})
+	if rec := serve(router, http.MethodGet, "/expenses", forged, nil); rec.Code != http.StatusUnauthorized {
+		t.Errorf("token signed with another key: expected 401, got %d", rec.Code)
+	}
+	if rec := serve(router, http.MethodPost, "/expenses", "", map[string]any{"description": "x"}); rec.Code != http.StatusUnauthorized {
+		t.Errorf("create without token: expected 401, got %d", rec.Code)
+	}
+}
+
+func TestHandler_Security_UserCannotCreateUpdateDelete_Returns403(t *testing.T) {
+	router := newTestRouter(t)
+	e := createExpense(t, router, validToken(t), map[string]any{"residentId": "res-a"})
+	id := fmt.Sprintf("%v", e["id"])
+	user := tokenFor(t, "user-a", "condo-a", authz.RoleUser) // owner of res-a
+
+	if rec := serve(router, http.MethodPost, "/expenses", user, map[string]any{
+		"description": "x", "amountCents": 1, "dueDate": "2026-03-31T00:00:00Z", "residentId": "res-a",
+	}); rec.Code != http.StatusForbidden {
+		t.Errorf("create: expected 403, got %d — %s", rec.Code, rec.Body.String())
+	}
+	if rec := serve(router, http.MethodPut, "/expenses/"+id, user, map[string]any{"amountCents": 1}); rec.Code != http.StatusForbidden {
+		t.Errorf("update: expected 403, got %d", rec.Code)
+	}
+	if rec := serve(router, http.MethodDelete, "/expenses/"+id, user, nil); rec.Code != http.StatusForbidden {
+		t.Errorf("delete: expected 403, got %d", rec.Code)
+	}
+	// A token without any role is not an admin either.
+	if rec := serve(router, http.MethodDelete, "/expenses/"+id, tokenFor(t, "user-x", "condo-a"), nil); rec.Code != http.StatusForbidden {
+		t.Errorf("delete without roles: expected 403, got %d", rec.Code)
+	}
+
+	rec := serve(router, http.MethodGet, "/expenses/"+id, validToken(t), nil)
+	var got map[string]any
+	_ = json.NewDecoder(rec.Body).Decode(&got)
+	if rec.Code != http.StatusOK || got["amountCents"] != e["amountCents"] {
+		t.Errorf("expense must be untouched: %d %v", rec.Code, got)
+	}
+}
+
+func TestHandler_Security_UserSeesOnlyOwnUnits(t *testing.T) {
+	router := newTestRouter(t)
+	admin := validToken(t)
+	resA := createExpense(t, router, admin, map[string]any{"description": "res-a", "dueDate": "2026-01-01T00:00:00Z", "residentId": "res-a"})
+	shopA := createExpense(t, router, admin, map[string]any{"description": "shop-a", "dueDate": "2026-02-01T00:00:00Z", "residentId": "", "shopOwnerId": "shop-a"})
+	resB := createExpense(t, router, admin, map[string]any{"description": "res-b", "dueDate": "2026-03-01T00:00:00Z", "residentId": "res-b"})
+	userA := tokenFor(t, "user-a", "condo-a", authz.RoleUser)
+	userB := tokenFor(t, "user-b", "condo-a", authz.RoleUser)
+
+	b := decodeList(t, serve(router, http.MethodGet, "/expenses", userA, nil))
+	if b.Total != 2 || len(b.Items) != 2 || b.Items[0]["id"] != resA["id"] || b.Items[1]["id"] != shopA["id"] {
+		t.Fatalf("user-a list: expected [res-a shop-a], got %+v", b)
+	}
+	b = decodeList(t, serve(router, http.MethodGet, "/expenses", userB, nil))
+	if b.Total != 1 || len(b.Items) != 1 || b.Items[0]["id"] != resB["id"] {
+		t.Fatalf("user-b list: expected [res-b], got %+v", b)
+	}
+	b = decodeList(t, serve(router, http.MethodGet, "/expenses", tokenFor(t, "nobody", "condo-a", authz.RoleUser), nil))
+	if b.Total != 0 || len(b.Items) != 0 {
+		t.Fatalf("user without units: expected empty list, got %+v", b)
+	}
+	if b = decodeList(t, serve(router, http.MethodGet, "/expenses", admin, nil)); b.Total != 3 {
+		t.Errorf("admin list: expected 3, got %+v", b)
+	}
+
+	if rec := serve(router, http.MethodGet, fmt.Sprintf("/expenses/%v", shopA["id"]), userA, nil); rec.Code != http.StatusOK {
+		t.Errorf("user-a GET own shop expense: expected 200, got %d", rec.Code)
+	}
+	if rec := serve(router, http.MethodGet, fmt.Sprintf("/expenses/%v", resB["id"]), userA, nil); rec.Code != http.StatusNotFound {
+		t.Errorf("user-a GET user-b expense: expected 404, got %d", rec.Code)
+	}
+	if rec := serve(router, http.MethodGet, fmt.Sprintf("/expenses/%v", resA["id"]), userB, nil); rec.Code != http.StatusNotFound {
+		t.Errorf("user-b GET user-a expense: expected 404, got %d", rec.Code)
+	}
+}
+
+func TestHandler_Security_OtherCondominiumToken_Returns404(t *testing.T) {
+	router := newTestRouter(t)
+	e := createExpense(t, router, validToken(t), map[string]any{"residentId": "res-a"})
+	path := fmt.Sprintf("/expenses/%v", e["id"])
+	otherAdmin := tokenFor(t, "admin-1", "condo-b", authz.RoleAdmin) // same user ID, other condominium
+
+	if rec := serve(router, http.MethodGet, path, otherAdmin, nil); rec.Code != http.StatusNotFound {
+		t.Errorf("get: expected 404, got %d", rec.Code)
+	}
+	if rec := serve(router, http.MethodPut, path, otherAdmin, map[string]any{"amountCents": 1}); rec.Code != http.StatusNotFound {
+		t.Errorf("update: expected 404, got %d", rec.Code)
+	}
+	if rec := serve(router, http.MethodDelete, path, otherAdmin, nil); rec.Code != http.StatusNotFound {
+		t.Errorf("delete: expected 404, got %d", rec.Code)
+	}
+	if b := decodeList(t, serve(router, http.MethodGet, "/expenses", otherAdmin, nil)); b.Total != 0 || len(b.Items) != 0 {
+		t.Errorf("list: expected nothing from condo-a, got %+v", b)
+	}
+	// user-a's units resolve to res-a, but the token is for condo-b.
+	if rec := serve(router, http.MethodGet, path, tokenFor(t, "user-a", "condo-b", authz.RoleUser), nil); rec.Code != http.StatusNotFound {
+		t.Errorf("user of other condominium: expected 404, got %d", rec.Code)
+	}
+
+	rec := serve(router, http.MethodGet, path, validToken(t), nil)
+	var got map[string]any
+	_ = json.NewDecoder(rec.Body).Decode(&got)
+	if rec.Code != http.StatusOK || got["amountCents"] != e["amountCents"] {
+		t.Errorf("condo-a expense must be untouched: %d %v", rec.Code, got)
+	}
+}
+
+func TestHandler_List_Pagination(t *testing.T) {
+	router := newTestRouter(t)
+	admin := validToken(t)
+	for _, d := range []string{"2026-01-10", "2026-02-10", "2026-02-20", "2026-02-05", "2026-02-15", "2026-03-10"} {
+		createExpense(t, router, admin, map[string]any{"description": d, "dueDate": d + "T00:00:00Z"})
+	}
+
+	b := decodeList(t, serve(router, http.MethodGet, "/expenses?page=2&pageSize=4", admin, nil))
+	if b.Page != 2 || b.PageSize != 4 || b.Total != 6 || len(b.Items) != 2 ||
+		b.Items[0]["description"] != "2026-02-20" || b.Items[1]["description"] != "2026-03-10" {
+		t.Fatalf("page 2: unexpected %+v", b)
+	}
+
+	// Combined with the date filter: February has 4 expenses.
+	q := "/expenses?from=2026-02-01T00:00:00Z&to=2026-02-28T23:59:59Z&pageSize=3"
+	b = decodeList(t, serve(router, http.MethodGet, q, admin, nil))
+	if b.Page != 1 || b.PageSize != 3 || b.Total != 4 || len(b.Items) != 3 ||
+		b.Items[0]["description"] != "2026-02-05" || b.Items[2]["description"] != "2026-02-15" {
+		t.Fatalf("filtered page 1: unexpected %+v", b)
+	}
+	b = decodeList(t, serve(router, http.MethodGet, q+"&page=2", admin, nil))
+	if b.Total != 4 || len(b.Items) != 1 || b.Items[0]["description"] != "2026-02-20" {
+		t.Fatalf("filtered page 2: unexpected %+v", b)
+	}
+	b = decodeList(t, serve(router, http.MethodGet, q+"&page=5", admin, nil))
+	if b.Total != 4 || b.Items == nil || len(b.Items) != 0 {
+		t.Fatalf("past the end: expected empty items, got %+v", b)
+	}
+
+	if b = decodeList(t, serve(router, http.MethodGet, "/expenses?pageSize=100", admin, nil)); b.PageSize != 100 || len(b.Items) != 6 {
+		t.Errorf("max pageSize: unexpected %+v", b)
+	}
+	for _, bad := range []string{"page=0", "page=-1", "page=abc", "pageSize=0", "pageSize=101", "pageSize=x"} {
+		if rec := serve(router, http.MethodGet, "/expenses?"+bad, admin, nil); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: expected 400, got %d", bad, rec.Code)
+		}
+	}
+}
+
+func TestHandler_List_InvalidToDate_Returns400(t *testing.T) {
+	router := newTestRouter(t)
+	if rec := serve(router, http.MethodGet, "/expenses?to=yesterday", validToken(t), nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestIntegration_Expenses_Security(t *testing.T) {
+	pool := dbtest.NewPool(t)
+	router := expense.NewHandler(expense.NewService(expense.NewPostgresRepository(pool), testUnits), middleware.Authenticate(handlerJWT))
+	admin := validToken(t)
+	resA := createExpense(t, router, admin, map[string]any{"residentId": "res-a"})
+	resB := createExpense(t, router, admin, map[string]any{"residentId": "res-b"})
+	userA := tokenFor(t, "user-a", "condo-a", authz.RoleUser)
+
+	if b := decodeList(t, serve(router, http.MethodGet, "/expenses", userA, nil)); b.Total != 1 || len(b.Items) != 1 || b.Items[0]["id"] != resA["id"] {
+		t.Errorf("user-a list: expected only res-a, got %+v", b)
+	}
+	if rec := serve(router, http.MethodGet, fmt.Sprintf("/expenses/%v", resB["id"]), userA, nil); rec.Code != http.StatusNotFound {
+		t.Errorf("user-a GET res-b: expected 404, got %d", rec.Code)
+	}
+	if rec := serve(router, http.MethodDelete, fmt.Sprintf("/expenses/%v", resA["id"]), userA, nil); rec.Code != http.StatusForbidden {
+		t.Errorf("user-a DELETE: expected 403, got %d", rec.Code)
+	}
+	otherAdmin := tokenFor(t, "admin-1", "condo-b", authz.RoleAdmin)
+	if rec := serve(router, http.MethodPut, fmt.Sprintf("/expenses/%v", resA["id"]), otherAdmin, map[string]any{"amountCents": 1}); rec.Code != http.StatusNotFound {
+		t.Errorf("condo-b admin PUT: expected 404, got %d", rec.Code)
+	}
+	if rec := serve(router, http.MethodGet, fmt.Sprintf("/expenses/%v", resA["id"]), otherAdmin, nil); rec.Code != http.StatusNotFound {
+		t.Errorf("condo-b admin GET: expected 404, got %d", rec.Code)
+	}
+	if b := decodeList(t, serve(router, http.MethodGet, "/expenses", otherAdmin, nil)); b.Total != 0 {
+		t.Errorf("condo-b admin list: expected nothing, got %+v", b)
 	}
 }

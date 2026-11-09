@@ -2,13 +2,24 @@ package user_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/victorradael/condoguard/api/internal/user"
+	"github.com/victorradael/condoguard/api/pkg/page"
 )
 
 func newService() *user.Service {
 	return user.NewService(user.NewInMemoryRepository())
+}
+
+func mustCreate(t *testing.T, svc *user.Service, req user.CreateRequest) *user.User {
+	t.Helper()
+	u, err := svc.Create(context.Background(), req)
+	if err != nil {
+		t.Fatalf("create %q: %v", req.Email, err)
+	}
+	return u
 }
 
 // ── Create ────────────────────────────────────────────────────────────────────
@@ -19,7 +30,7 @@ func TestUser_Create_Success(t *testing.T) {
 	u, err := svc.Create(context.Background(), user.CreateRequest{
 		Username: "alice",
 		Email:    "alice@example.com",
-		Password: "S3cr3t!",
+		Password: strongPass,
 		Roles:    []string{"ROLE_USER"},
 	})
 
@@ -39,7 +50,7 @@ func TestUser_Create_MissingEmail_ReturnsValidationError(t *testing.T) {
 
 	_, err := svc.Create(context.Background(), user.CreateRequest{
 		Username: "alice",
-		Password: "S3cr3t!",
+		Password: strongPass,
 	})
 
 	if !user.IsValidationError(err) {
@@ -52,7 +63,7 @@ func TestUser_Create_MissingUsername_ReturnsValidationError(t *testing.T) {
 
 	_, err := svc.Create(context.Background(), user.CreateRequest{
 		Email:    "alice@example.com",
-		Password: "S3cr3t!",
+		Password: strongPass,
 	})
 
 	if !user.IsValidationError(err) {
@@ -80,13 +91,13 @@ func TestUser_Create_DuplicateEmail_ReturnsDuplicateError(t *testing.T) {
 	_, _ = svc.Create(ctx, user.CreateRequest{
 		Username: "alice",
 		Email:    "alice@example.com",
-		Password: "S3cr3t!",
+		Password: strongPass,
 	})
 
 	_, err := svc.Create(ctx, user.CreateRequest{
 		Username: "alice2",
 		Email:    "alice@example.com",
-		Password: "S3cr3t!",
+		Password: strongPass,
 	})
 
 	if !user.IsDuplicateError(err) {
@@ -102,11 +113,11 @@ func TestUser_Create_PasswordIsHashed(t *testing.T) {
 	created, _ := svc.Create(ctx, user.CreateRequest{
 		Username: "alice",
 		Email:    "alice@example.com",
-		Password: "S3cr3t!",
+		Password: strongPass,
 	})
 
 	stored, _ := repo.FindByID(ctx, created.ID)
-	if stored.Password == "S3cr3t!" {
+	if stored.Password == strongPass {
 		t.Error("password must be hashed, not stored as plaintext")
 	}
 }
@@ -120,7 +131,7 @@ func TestUser_GetByID_ExistingUser_ReturnsUser(t *testing.T) {
 	created, _ := svc.Create(ctx, user.CreateRequest{
 		Username: "alice",
 		Email:    "alice@example.com",
-		Password: "S3cr3t!",
+		Password: strongPass,
 	})
 
 	found, err := svc.GetByID(ctx, created.ID)
@@ -147,27 +158,56 @@ func TestUser_List_ReturnsAllUsers(t *testing.T) {
 	svc := newService()
 	ctx := context.Background()
 
-	_, _ = svc.Create(ctx, user.CreateRequest{Username: "u1", Email: "u1@x.com", Password: "pass"})
-	_, _ = svc.Create(ctx, user.CreateRequest{Username: "u2", Email: "u2@x.com", Password: "pass"})
+	mustCreate(t, svc, user.CreateRequest{Username: "u1", Email: "u1@x.com", Password: strongPass})
+	mustCreate(t, svc, user.CreateRequest{Username: "u2", Email: "u2@x.com", Password: strongPass})
 
-	users, err := svc.List(ctx)
+	res, err := svc.List(ctx, page.Default)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if len(users) != 2 {
-		t.Errorf("expected 2 users, got %d", len(users))
+	if len(res.Items) != 2 || res.Total != 2 {
+		t.Errorf("expected 2 users (total 2), got %d (total %d)", len(res.Items), res.Total)
+	}
+	if res.Page != 1 || res.PageSize != page.DefaultSize {
+		t.Errorf("unexpected page envelope: page=%d size=%d", res.Page, res.PageSize)
 	}
 }
 
 func TestUser_List_Empty_ReturnsEmptySlice(t *testing.T) {
 	svc := newService()
 
-	users, err := svc.List(context.Background())
+	res, err := svc.List(context.Background(), page.Default)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if users == nil {
+	if res.Items == nil {
 		t.Error("expected empty slice, got nil")
+	}
+	if res.Total != 0 {
+		t.Errorf("expected total 0, got %d", res.Total)
+	}
+}
+
+func TestUser_List_Paginates(t *testing.T) {
+	svc := newService()
+	for i := 1; i <= 5; i++ {
+		mustCreate(t, svc, user.CreateRequest{Username: fmt.Sprintf("u%d", i), Email: fmt.Sprintf("u%d@x.com", i), Password: strongPass})
+	}
+
+	res, err := svc.List(context.Background(), page.Params{Page: 2, Size: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Page != 2 || res.PageSize != 2 || res.Total != 5 || len(res.Items) != 2 {
+		t.Fatalf("unexpected page: %+v", res)
+	}
+	if res.Items[0].Username != "u3" || res.Items[1].Username != "u4" {
+		t.Errorf("expected u3,u4, got %s,%s", res.Items[0].Username, res.Items[1].Username)
+	}
+
+	past, _ := svc.List(context.Background(), page.Params{Page: 4, Size: 2})
+	if past.Items == nil || len(past.Items) != 0 || past.Total != 5 {
+		t.Errorf("past the end: %+v", past)
 	}
 }
 
@@ -180,7 +220,7 @@ func TestUser_Update_ChangesUsernameAndRoles(t *testing.T) {
 	created, _ := svc.Create(ctx, user.CreateRequest{
 		Username: "alice",
 		Email:    "alice@example.com",
-		Password: "S3cr3t!",
+		Password: strongPass,
 	})
 
 	updated, err := svc.Update(ctx, created.ID, user.UpdateRequest{
@@ -206,7 +246,7 @@ func TestUser_Update_EmailIsImmutable(t *testing.T) {
 	created, _ := svc.Create(ctx, user.CreateRequest{
 		Username: "alice",
 		Email:    "alice@example.com",
-		Password: "S3cr3t!",
+		Password: strongPass,
 	})
 
 	updated, err := svc.Update(ctx, created.ID, user.UpdateRequest{
@@ -240,7 +280,7 @@ func TestUser_Delete_ExistingUser_Succeeds(t *testing.T) {
 	created, _ := svc.Create(ctx, user.CreateRequest{
 		Username: "alice",
 		Email:    "alice@example.com",
-		Password: "S3cr3t!",
+		Password: strongPass,
 	})
 
 	if err := svc.Delete(ctx, created.ID); err != nil {

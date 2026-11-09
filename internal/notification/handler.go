@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+
+	"github.com/victorradael/condoguard/api/internal/authz"
+	"github.com/victorradael/condoguard/api/pkg/page"
 )
 
 // NewHandler wires the notification CRUD routes behind the provided auth middleware.
-// Any authenticated user may access these routes.
+// Admins manage notifications; recipients read them and mark them as read (see Service).
 func NewHandler(svc *Service, authMW func(http.Handler) http.Handler) http.Handler {
 	h := &handler{svc: svc}
 
@@ -28,9 +31,14 @@ type handler struct {
 }
 
 func (h *handler) list(w http.ResponseWriter, r *http.Request) {
-	list, err := h.svc.List(r.Context())
+	p, err := page.FromRequest(r)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	list, err := h.svc.List(r.Context(), p)
+	if err != nil {
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
@@ -49,7 +57,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, n)
@@ -63,7 +71,7 @@ func (h *handler) getByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "notification not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, n)
@@ -83,7 +91,7 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "notification not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, n)
@@ -96,7 +104,7 @@ func (h *handler) delete(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "notification not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeServiceError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -112,10 +120,19 @@ func (h *handler) markAsRead(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "notification not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, n)
+}
+
+// writeServiceError answers 401/403 for authorization errors and 500 otherwise.
+func writeServiceError(w http.ResponseWriter, err error) {
+	if status, msg, ok := authz.Status(err); ok {
+		writeError(w, status, msg)
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "internal error")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

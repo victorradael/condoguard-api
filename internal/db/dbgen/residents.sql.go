@@ -11,6 +11,25 @@ import (
 	"github.com/google/uuid"
 )
 
+const countResidents = `-- name: CountResidents :one
+SELECT count(*)
+FROM residents
+WHERE condominium_id = $1
+  AND ($2::text IS NULL OR owner_id = $2::text)
+`
+
+type CountResidentsParams struct {
+	CondominiumID string
+	OwnerID       *string
+}
+
+func (q *Queries) CountResidents(ctx context.Context, arg CountResidentsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countResidents, arg.CondominiumID, arg.OwnerID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteResident = `-- name: DeleteResident :execrows
 DELETE FROM residents
 WHERE condominium_id = $1 AND id = $2
@@ -82,15 +101,61 @@ func (q *Queries) InsertResident(ctx context.Context, arg InsertResidentParams) 
 	return id, err
 }
 
+const listResidentIDsByOwner = `-- name: ListResidentIDsByOwner :many
+SELECT id
+FROM residents
+WHERE condominium_id = $1 AND owner_id = $2
+`
+
+type ListResidentIDsByOwnerParams struct {
+	CondominiumID string
+	OwnerID       string
+}
+
+func (q *Queries) ListResidentIDsByOwner(ctx context.Context, arg ListResidentIDsByOwnerParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listResidentIDsByOwner, arg.CondominiumID, arg.OwnerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listResidents = `-- name: ListResidents :many
 SELECT id, condominium_id, condominium_ref, unit_number, floor, owner_id, created_at
 FROM residents
 WHERE condominium_id = $1
+  AND ($2::text IS NULL OR owner_id = $2::text)
 ORDER BY created_at, id
+LIMIT $4 OFFSET $3
 `
 
-func (q *Queries) ListResidents(ctx context.Context, condominiumID string) ([]Resident, error) {
-	rows, err := q.db.Query(ctx, listResidents, condominiumID)
+type ListResidentsParams struct {
+	CondominiumID string
+	OwnerID       *string
+	PageOffset    int32
+	PageLimit     int32
+}
+
+// owner_id NULL lista todas as unidades do condomínio (administração).
+func (q *Queries) ListResidents(ctx context.Context, arg ListResidentsParams) ([]Resident, error) {
+	rows, err := q.db.Query(ctx, listResidents,
+		arg.CondominiumID,
+		arg.OwnerID,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

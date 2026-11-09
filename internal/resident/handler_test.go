@@ -8,33 +8,45 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/victorradael/condoguard/api/internal/authz"
 	"github.com/victorradael/condoguard/api/internal/db/dbtest"
-	"github.com/victorradael/condoguard/api/internal/tenant"
-
 	"github.com/victorradael/condoguard/api/internal/middleware"
 	"github.com/victorradael/condoguard/api/internal/resident"
 	pkgjwt "github.com/victorradael/condoguard/api/pkg/jwt"
 )
 
-const handlerSecret = "dGVzdC1zZWNyZXQta2V5LWZvci11bml0LXRlc3Rpbmc="
+const handlerSecret = "dGVzdC1zZWNyZXQta2V5LWZvci11bml0LXRlc3RpbmctMzJi"
+
+const (
+	condoA = "condo-a"
+	condoB = "condo-b"
+)
+
+var handlerJWT = pkgjwt.MustNewService(handlerSecret)
+
+func newRouter(repo resident.Repository) http.Handler {
+	return resident.NewHandler(resident.NewService(repo), middleware.Authenticate(handlerJWT))
+}
 
 func newTestRouter(t *testing.T) http.Handler {
 	t.Helper()
-	repo := resident.NewInMemoryRepository()
-	svc := resident.NewService(repo)
-	jwtSvc := pkgjwt.NewService(handlerSecret)
-	return resident.NewHandler(svc, middleware.Authenticate(jwtSvc))
+	return newRouter(resident.NewInMemoryRepository())
 }
 
-func validToken(t *testing.T) string {
+func token(t *testing.T, userID, condoID, role string) string {
 	t.Helper()
-	svc := pkgjwt.NewService(handlerSecret)
-	tok, err := svc.GenerateToken("user-1", []string{"ROLE_USER"})
+	tok, err := handlerJWT.GenerateToken(userID, condoID, []string{role})
 	if err != nil {
 		t.Fatalf("generate token: %v", err)
 	}
 	return tok
 }
+
+// validToken is an admin of condo-a: the role allowed to manage units.
+func validToken(t *testing.T) string { return token(t, "admin-1", condoA, authz.RoleAdmin) }
+
+// userToken is a ROLE_USER (resident) of condo-a.
+func userToken(t *testing.T, userID string) string { return token(t, userID, condoA, authz.RoleUser) }
 
 func authReq(method, path, token string, body any) *http.Request {
 	var req *http.Request
@@ -51,15 +63,25 @@ func authReq(method, path, token string, body any) *http.Request {
 	return req
 }
 
+func serve(router http.Handler, method, path, tok string, body any) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, authReq(method, path, tok, body))
+	return rec
+}
+
 func createResident(t *testing.T, router http.Handler, tok string, unitNumber, condoID string) map[string]any {
 	t.Helper()
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, authReq(http.MethodPost, "/residents", tok, map[string]any{
+	return createOwnedResident(t, router, tok, unitNumber, condoID, "user-1")
+}
+
+func createOwnedResident(t *testing.T, router http.Handler, tok, unitNumber, condoID, ownerID string) map[string]any {
+	t.Helper()
+	rec := serve(router, http.MethodPost, "/residents", tok, map[string]any{
 		"unitNumber":    unitNumber,
 		"floor":         1,
 		"condominiumId": condoID,
-		"ownerId":       "user-1",
-	}))
+		"ownerId":       ownerID,
+	})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("setup createResident: expected 201, got %d — %s", rec.Code, rec.Body.String())
 	}
@@ -68,12 +90,32 @@ func createResident(t *testing.T, router http.Handler, tok string, unitNumber, c
 	return r
 }
 
+type listPage struct {
+	Items    []map[string]any `json:"items"`
+	Page     int              `json:"page"`
+	PageSize int              `json:"pageSize"`
+	Total    int64            `json:"total"`
+}
+
+func decodePage(t *testing.T, rec *httptest.ResponseRecorder) listPage {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list: expected 200, got %d — %s", rec.Code, rec.Body.String())
+	}
+	var p listPage
+	if err := json.NewDecoder(rec.Body).Decode(&p); err != nil {
+		t.Fatalf("decode page: %v", err)
+	}
+	return p
+}
+
+func idOf(r map[string]any) string { return fmt.Sprintf("%v", r["id"]) }
+
 // ── Auth guard ────────────────────────────────────────────────────────────────
 
 func TestResidents_NoToken_Returns401(t *testing.T) {
 	router := newTestRouter(t)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, authReq(http.MethodGet, "/residents", "", nil))
+	rec := serve(router, http.MethodGet, "/residents", "", nil)
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", rec.Code)
 	}
@@ -83,16 +125,20 @@ func TestResidents_NoToken_Returns401(t *testing.T) {
 
 func TestResidents_List_Empty_Returns200WithEmptyArray(t *testing.T) {
 	router := newTestRouter(t)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, authReq(http.MethodGet, "/residents", validToken(t), nil))
+	rec := serve(router, http.MethodGet, "/residents", validToken(t), nil)
 
 	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
+		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	var list []any
-	_ = json.NewDecoder(rec.Body).Decode(&list)
-	if len(list) != 0 {
-		t.Errorf("expected empty array, got %v", list)
+	var raw map[string]json.RawMessage
+	_ = json.Unmarshal(rec.Body.Bytes(), &raw)
+	if string(raw["items"]) != "[]" {
+		t.Errorf("expected items to be [], got %s", raw["items"])
+	}
+	var p listPage
+	_ = json.Unmarshal(rec.Body.Bytes(), &p)
+	if p.Total != 0 || p.Page != 1 || p.PageSize != 20 {
+		t.Errorf("expected empty page 1/20 total 0, got %+v", p)
 	}
 }
 
@@ -100,13 +146,12 @@ func TestResidents_List_Empty_Returns200WithEmptyArray(t *testing.T) {
 
 func TestResidents_Create_Returns201(t *testing.T) {
 	router := newTestRouter(t)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, authReq(http.MethodPost, "/residents", validToken(t), map[string]any{
+	rec := serve(router, http.MethodPost, "/residents", validToken(t), map[string]any{
 		"unitNumber":    "101",
 		"floor":         1,
 		"condominiumId": "condo-1",
 		"ownerId":       "user-1",
-	}))
+	})
 
 	if rec.Code != http.StatusCreated {
 		t.Errorf("expected 201, got %d — %s", rec.Code, rec.Body.String())
@@ -120,12 +165,11 @@ func TestResidents_Create_Returns201(t *testing.T) {
 
 func TestResidents_Create_MissingUnitNumber_Returns422(t *testing.T) {
 	router := newTestRouter(t)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, authReq(http.MethodPost, "/residents", validToken(t), map[string]any{
+	rec := serve(router, http.MethodPost, "/residents", validToken(t), map[string]any{
 		"floor":         1,
 		"condominiumId": "condo-1",
 		"ownerId":       "user-1",
-	}))
+	})
 
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("expected 422, got %d", rec.Code)
@@ -134,12 +178,11 @@ func TestResidents_Create_MissingUnitNumber_Returns422(t *testing.T) {
 
 func TestResidents_Create_MissingCondominiumID_Returns422(t *testing.T) {
 	router := newTestRouter(t)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, authReq(http.MethodPost, "/residents", validToken(t), map[string]any{
+	rec := serve(router, http.MethodPost, "/residents", validToken(t), map[string]any{
 		"unitNumber": "101",
 		"floor":      1,
 		"ownerId":    "user-1",
-	}))
+	})
 
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("expected 422, got %d", rec.Code)
@@ -152,13 +195,12 @@ func TestResidents_Create_DuplicateUnitInCondominium_Returns409(t *testing.T) {
 
 	createResident(t, router, tok, "101", "condo-1")
 
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, authReq(http.MethodPost, "/residents", tok, map[string]any{
+	rec := serve(router, http.MethodPost, "/residents", tok, map[string]any{
 		"unitNumber":    "101",
 		"floor":         2,
 		"condominiumId": "condo-1",
 		"ownerId":       "user-2",
-	}))
+	})
 
 	if rec.Code != http.StatusConflict {
 		t.Errorf("expected 409, got %d", rec.Code)
@@ -171,13 +213,12 @@ func TestResidents_Create_SameUnitDifferentCondominium_Returns201(t *testing.T) 
 
 	createResident(t, router, tok, "101", "condo-1")
 
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, authReq(http.MethodPost, "/residents", tok, map[string]any{
+	rec := serve(router, http.MethodPost, "/residents", tok, map[string]any{
 		"unitNumber":    "101",
 		"floor":         1,
 		"condominiumId": "condo-2",
 		"ownerId":       "user-2",
-	}))
+	})
 
 	if rec.Code != http.StatusCreated {
 		t.Errorf("expected 201 for same unit in different condominium, got %d", rec.Code)
@@ -189,12 +230,9 @@ func TestResidents_Create_SameUnitDifferentCondominium_Returns201(t *testing.T) 
 func TestResidents_GetByID_Returns200(t *testing.T) {
 	router := newTestRouter(t)
 	tok := validToken(t)
-	r := createResident(t, router, tok, "501", "condo-1")
-	id := fmt.Sprintf("%v", r["id"])
+	id := idOf(createResident(t, router, tok, "501", "condo-1"))
 
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, authReq(http.MethodGet, "/residents/"+id, tok, nil))
-
+	rec := serve(router, http.MethodGet, "/residents/"+id, tok, nil)
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", rec.Code)
 	}
@@ -202,9 +240,7 @@ func TestResidents_GetByID_Returns200(t *testing.T) {
 
 func TestResidents_GetByID_NonExistent_Returns404(t *testing.T) {
 	router := newTestRouter(t)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, authReq(http.MethodGet, "/residents/ghost-id", validToken(t), nil))
-
+	rec := serve(router, http.MethodGet, "/residents/ghost-id", validToken(t), nil)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", rec.Code)
 	}
@@ -215,14 +251,12 @@ func TestResidents_GetByID_NonExistent_Returns404(t *testing.T) {
 func TestResidents_Update_Returns200(t *testing.T) {
 	router := newTestRouter(t)
 	tok := validToken(t)
-	r := createResident(t, router, tok, "601", "condo-1")
-	id := fmt.Sprintf("%v", r["id"])
+	id := idOf(createResident(t, router, tok, "601", "condo-1"))
 
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, authReq(http.MethodPut, "/residents/"+id, tok, map[string]any{
+	rec := serve(router, http.MethodPut, "/residents/"+id, tok, map[string]any{
 		"unitNumber": "601",
 		"floor":      9,
-	}))
+	})
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d — %s", rec.Code, rec.Body.String())
@@ -236,12 +270,10 @@ func TestResidents_Update_Returns200(t *testing.T) {
 
 func TestResidents_Update_NonExistent_Returns404(t *testing.T) {
 	router := newTestRouter(t)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, authReq(http.MethodPut, "/residents/ghost-id", validToken(t), map[string]any{
+	rec := serve(router, http.MethodPut, "/residents/ghost-id", validToken(t), map[string]any{
 		"unitNumber": "101",
 		"floor":      1,
-	}))
-
+	})
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", rec.Code)
 	}
@@ -252,12 +284,9 @@ func TestResidents_Update_NonExistent_Returns404(t *testing.T) {
 func TestResidents_Delete_Returns204(t *testing.T) {
 	router := newTestRouter(t)
 	tok := validToken(t)
-	r := createResident(t, router, tok, "701", "condo-1")
-	id := fmt.Sprintf("%v", r["id"])
+	id := idOf(createResident(t, router, tok, "701", "condo-1"))
 
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, authReq(http.MethodDelete, "/residents/"+id, tok, nil))
-
+	rec := serve(router, http.MethodDelete, "/residents/"+id, tok, nil)
 	if rec.Code != http.StatusNoContent {
 		t.Errorf("expected 204, got %d", rec.Code)
 	}
@@ -265,19 +294,234 @@ func TestResidents_Delete_Returns204(t *testing.T) {
 
 func TestResidents_Delete_NonExistent_Returns404(t *testing.T) {
 	router := newTestRouter(t)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, authReq(http.MethodDelete, "/residents/ghost-id", validToken(t), nil))
-
+	rec := serve(router, http.MethodDelete, "/residents/ghost-id", validToken(t), nil)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", rec.Code)
+	}
+}
+
+// ── Security: role-based authorization ────────────────────────────────────────
+
+func TestHandler_Security_UserCannotCreateUnit_Returns403(t *testing.T) {
+	router := newTestRouter(t)
+	rec := serve(router, http.MethodPost, "/residents", userToken(t, "user-1"), map[string]any{
+		"unitNumber": "101", "floor": 1, "condominiumId": "condo-1", "ownerId": "user-1",
+	})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d — %s", rec.Code, rec.Body.String())
+	}
+	if p := decodePage(t, serve(router, http.MethodGet, "/residents", validToken(t), nil)); p.Total != 0 {
+		t.Errorf("forbidden create must not persist anything, got total %d", p.Total)
+	}
+}
+
+func TestHandler_Security_UserCannotUpdateOwnUnit_Returns403(t *testing.T) {
+	router := newTestRouter(t)
+	id := idOf(createOwnedResident(t, router, validToken(t), "101", "condo-1", "user-1"))
+
+	// Even the owner of the unit is not allowed to change it.
+	rec := serve(router, http.MethodPut, "/residents/"+id, userToken(t, "user-1"), map[string]any{
+		"unitNumber": "999", "floor": 9,
+	})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d — %s", rec.Code, rec.Body.String())
+	}
+
+	var got map[string]any
+	_ = json.NewDecoder(serve(router, http.MethodGet, "/residents/"+id, validToken(t), nil).Body).Decode(&got)
+	if got["unitNumber"] != "101" || got["floor"] != float64(1) {
+		t.Errorf("forbidden update must not change the unit, got %v", got)
+	}
+}
+
+func TestHandler_Security_UserCannotDeleteUnit_Returns403(t *testing.T) {
+	router := newTestRouter(t)
+	id := idOf(createOwnedResident(t, router, validToken(t), "101", "condo-1", "user-1"))
+
+	rec := serve(router, http.MethodDelete, "/residents/"+id, userToken(t, "user-1"), nil)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d — %s", rec.Code, rec.Body.String())
+	}
+	if rec := serve(router, http.MethodGet, "/residents/"+id, validToken(t), nil); rec.Code != http.StatusOK {
+		t.Errorf("forbidden delete must keep the unit, GET returned %d", rec.Code)
+	}
+}
+
+func TestHandler_Security_UserListsOnlyOwnUnits(t *testing.T) {
+	router := newTestRouter(t)
+	admin := validToken(t)
+	a1 := idOf(createOwnedResident(t, router, admin, "101", "condo-1", "user-a"))
+	createOwnedResident(t, router, admin, "102", "condo-1", "user-b")
+	a2 := idOf(createOwnedResident(t, router, admin, "103", "condo-1", "user-a"))
+
+	p := decodePage(t, serve(router, http.MethodGet, "/residents", userToken(t, "user-a"), nil))
+	if p.Total != 2 || len(p.Items) != 2 {
+		t.Fatalf("expected 2 units for user-a, got total=%d items=%d", p.Total, len(p.Items))
+	}
+	for _, it := range p.Items {
+		if it["ownerId"] != "user-a" {
+			t.Errorf("user-a must only see own units, got %v", it)
+		}
+	}
+	if idOf(p.Items[0]) != a1 || idOf(p.Items[1]) != a2 {
+		t.Errorf("unexpected items: %v", p.Items)
+	}
+
+	// The admin still sees everything.
+	if p := decodePage(t, serve(router, http.MethodGet, "/residents", admin, nil)); p.Total != 3 {
+		t.Errorf("admin must see all 3 units, got %d", p.Total)
+	}
+
+	// A user without units gets an empty page.
+	if p := decodePage(t, serve(router, http.MethodGet, "/residents", userToken(t, "user-c"), nil)); p.Total != 0 || len(p.Items) != 0 {
+		t.Errorf("user-c must see nothing, got %+v", p)
+	}
+}
+
+func TestHandler_Security_UserCannotGetOtherUsersUnit_Returns404(t *testing.T) {
+	router := newTestRouter(t)
+	admin := validToken(t)
+	own := idOf(createOwnedResident(t, router, admin, "101", "condo-1", "user-a"))
+	other := idOf(createOwnedResident(t, router, admin, "102", "condo-1", "user-b"))
+
+	if rec := serve(router, http.MethodGet, "/residents/"+own, userToken(t, "user-a"), nil); rec.Code != http.StatusOK {
+		t.Errorf("own unit: expected 200, got %d", rec.Code)
+	}
+	if rec := serve(router, http.MethodGet, "/residents/"+other, userToken(t, "user-a"), nil); rec.Code != http.StatusNotFound {
+		t.Errorf("other user's unit: expected 404, got %d — %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ── Security: tenant isolation through the token's condominium ───────────────
+
+func TestHandler_Security_OtherCondominiumTokenCannotAccessUnit_Returns404(t *testing.T) {
+	router := newTestRouter(t)
+	id := idOf(createOwnedResident(t, router, validToken(t), "101", "condo-1", "user-1"))
+
+	// Admin of condo-b, and even a user with the same user ID as the owner.
+	foreign := map[string]string{
+		"admin of condo-b":         token(t, "admin-1", condoB, authz.RoleAdmin),
+		"same owner id in condo-b": token(t, "user-1", condoB, authz.RoleUser),
+	}
+	for name, tok := range foreign {
+		t.Run(name, func(t *testing.T) {
+			if rec := serve(router, http.MethodGet, "/residents/"+id, tok, nil); rec.Code != http.StatusNotFound {
+				t.Errorf("GET: expected 404, got %d", rec.Code)
+			}
+			if p := decodePage(t, serve(router, http.MethodGet, "/residents", tok, nil)); p.Total != 0 || len(p.Items) != 0 {
+				t.Errorf("list: expected nothing from condo-a, got %+v", p)
+			}
+		})
+	}
+
+	adminB := foreign["admin of condo-b"]
+	if rec := serve(router, http.MethodPut, "/residents/"+id, adminB, map[string]any{"unitNumber": "999", "floor": 9}); rec.Code != http.StatusNotFound {
+		t.Errorf("PUT: expected 404, got %d", rec.Code)
+	}
+	if rec := serve(router, http.MethodDelete, "/residents/"+id, adminB, nil); rec.Code != http.StatusNotFound {
+		t.Errorf("DELETE: expected 404, got %d", rec.Code)
+	}
+
+	// The unit is untouched in condo-a.
+	rec := serve(router, http.MethodGet, "/residents/"+id, validToken(t), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("condo-a GET: expected 200, got %d", rec.Code)
+	}
+	var got map[string]any
+	_ = json.NewDecoder(rec.Body).Decode(&got)
+	if got["unitNumber"] != "101" || got["floor"] != float64(1) {
+		t.Errorf("unit changed by another condominium: %v", got)
+	}
+}
+
+func TestHandler_Security_CreateIsScopedToTokenCondominium(t *testing.T) {
+	router := newTestRouter(t)
+	adminB := token(t, "admin-b", condoB, authz.RoleAdmin)
+
+	// The body's condominiumId does not pick the tenant: the token does.
+	createOwnedResident(t, router, adminB, "101", condoA, "user-1")
+
+	if p := decodePage(t, serve(router, http.MethodGet, "/residents", validToken(t), nil)); p.Total != 0 {
+		t.Errorf("condo-a must not see a unit created by condo-b, got %d", p.Total)
+	}
+	if p := decodePage(t, serve(router, http.MethodGet, "/residents", adminB, nil)); p.Total != 1 {
+		t.Errorf("condo-b must see its own unit, got %d", p.Total)
+	}
+}
+
+// ── Pagination ───────────────────────────────────────────────────────────────
+
+func TestHandler_Pagination_PageAndPageSizeRespected(t *testing.T) {
+	router := newTestRouter(t)
+	admin := validToken(t)
+	ids := make([]string, 0, 5)
+	for i := range 5 {
+		ids = append(ids, idOf(createResident(t, router, admin, fmt.Sprintf("%d", 100+i), "condo-1")))
+	}
+
+	cases := []struct {
+		query   string
+		page    int
+		size    int
+		wantIDs []string
+	}{
+		{"?page=1&pageSize=2", 1, 2, ids[0:2]},
+		{"?page=2&pageSize=2", 2, 2, ids[2:4]},
+		{"?page=3&pageSize=2", 3, 2, ids[4:5]},
+		{"?page=4&pageSize=2", 4, 2, nil},
+		{"?pageSize=100", 1, 100, ids},
+		{"", 1, 20, ids},
+	}
+	for _, c := range cases {
+		t.Run(c.query, func(t *testing.T) {
+			p := decodePage(t, serve(router, http.MethodGet, "/residents"+c.query, admin, nil))
+			if p.Page != c.page || p.PageSize != c.size || p.Total != 5 {
+				t.Errorf("expected page=%d pageSize=%d total=5, got %+v", c.page, c.size, p)
+			}
+			if len(p.Items) != len(c.wantIDs) {
+				t.Fatalf("expected %d items, got %d", len(c.wantIDs), len(p.Items))
+			}
+			for i, it := range p.Items {
+				if idOf(it) != c.wantIDs[i] {
+					t.Errorf("item %d: expected %s, got %s", i, c.wantIDs[i], idOf(it))
+				}
+			}
+		})
+	}
+}
+
+func TestHandler_Pagination_UserTotalCountsOnlyOwnUnits(t *testing.T) {
+	router := newTestRouter(t)
+	admin := validToken(t)
+	for i := range 3 {
+		createOwnedResident(t, router, admin, fmt.Sprintf("a%d", i), "condo-1", "user-a")
+		createOwnedResident(t, router, admin, fmt.Sprintf("b%d", i), "condo-1", "user-b")
+	}
+
+	p := decodePage(t, serve(router, http.MethodGet, "/residents?page=2&pageSize=2", userToken(t, "user-a"), nil))
+	if p.Total != 3 || len(p.Items) != 1 || p.Items[0]["ownerId"] != "user-a" {
+		t.Errorf("expected last page of user-a's 3 units, got %+v", p)
+	}
+}
+
+func TestHandler_Pagination_InvalidParams_Returns400(t *testing.T) {
+	router := newTestRouter(t)
+	for _, q := range []string{
+		"?page=0", "?page=-1", "?page=abc", "?page=1000001",
+		"?pageSize=0", "?pageSize=101", "?pageSize=x", "?page=1&pageSize=-5",
+	} {
+		t.Run(q, func(t *testing.T) {
+			if rec := serve(router, http.MethodGet, "/residents"+q, validToken(t), nil); rec.Code != http.StatusBadRequest {
+				t.Errorf("expected 400, got %d", rec.Code)
+			}
+		})
 	}
 }
 
 // ── Integration (PostgreSQL; requires TEST_DATABASE_URL) ───────────────────────
 
 func TestIntegration_Residents_CRUD(t *testing.T) {
-	pool := dbtest.NewPool(t)
-	router := tenant.Middleware("condo-test")(resident.NewHandler(resident.NewService(resident.NewPostgresRepository(pool)), middleware.Authenticate(pkgjwt.NewService(handlerSecret))))
+	router := newRouter(resident.NewPostgresRepository(dbtest.NewPool(t)))
 
 	crudRoundTrip(t, router, validToken(t), "/residents",
 		map[string]any{"unitNumber": "101", "floor": 1, "condominiumId": "condo-1", "ownerId": "user-1"},
@@ -294,18 +538,48 @@ func TestIntegration_Residents_CRUD(t *testing.T) {
 
 // Regression (FAB-11 N1): a floor outside int32 is a validation error, not a 500.
 func TestIntegration_Residents_Update_FloorOutOfRange_Returns422(t *testing.T) {
-	pool := dbtest.NewPool(t)
-	router := tenant.Middleware("condo-test")(resident.NewHandler(resident.NewService(resident.NewPostgresRepository(pool)), middleware.Authenticate(pkgjwt.NewService(handlerSecret))))
+	router := newRouter(resident.NewPostgresRepository(dbtest.NewPool(t)))
 	tok := validToken(t)
-	id := fmt.Sprintf("%v", createResident(t, router, tok, "901", "condo-1")["id"])
+	id := idOf(createResident(t, router, tok, "901", "condo-1"))
 
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, authReq(http.MethodPut, "/residents/"+id, tok, map[string]any{
+	rec := serve(router, http.MethodPut, "/residents/"+id, tok, map[string]any{
 		"unitNumber": "901",
 		"floor":      int64(1) << 40,
-	}))
+	})
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("expected 422, got %d — %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestIntegration_Security_Residents_RoleAndTenantIsolation(t *testing.T) {
+	router := newRouter(resident.NewPostgresRepository(dbtest.NewPool(t)))
+	admin := validToken(t)
+	own := idOf(createOwnedResident(t, router, admin, "101", "condo-1", "user-a"))
+	other := idOf(createOwnedResident(t, router, admin, "102", "condo-1", "user-b"))
+	userA := userToken(t, "user-a")
+	adminB := token(t, "admin-1", condoB, authz.RoleAdmin)
+
+	p := decodePage(t, serve(router, http.MethodGet, "/residents", userA, nil))
+	if p.Total != 1 || len(p.Items) != 1 || idOf(p.Items[0]) != own {
+		t.Errorf("user-a list: expected only own unit, got %+v", p)
+	}
+	if rec := serve(router, http.MethodGet, "/residents/"+other, userA, nil); rec.Code != http.StatusNotFound {
+		t.Errorf("user-a GET other: expected 404, got %d", rec.Code)
+	}
+	if rec := serve(router, http.MethodDelete, "/residents/"+own, userA, nil); rec.Code != http.StatusForbidden {
+		t.Errorf("user-a DELETE: expected 403, got %d", rec.Code)
+	}
+	if rec := serve(router, http.MethodGet, "/residents/"+own, adminB, nil); rec.Code != http.StatusNotFound {
+		t.Errorf("condo-b GET: expected 404, got %d", rec.Code)
+	}
+	if rec := serve(router, http.MethodPut, "/residents/"+own, adminB, map[string]any{"floor": 7}); rec.Code != http.StatusNotFound {
+		t.Errorf("condo-b PUT: expected 404, got %d", rec.Code)
+	}
+	if rec := serve(router, http.MethodDelete, "/residents/"+own, adminB, nil); rec.Code != http.StatusNotFound {
+		t.Errorf("condo-b DELETE: expected 404, got %d", rec.Code)
+	}
+	if p := decodePage(t, serve(router, http.MethodGet, "/residents", admin, nil)); p.Total != 2 {
+		t.Errorf("condo-a admin: expected 2 units intact, got %d", p.Total)
 	}
 }
 
@@ -314,9 +588,7 @@ func TestIntegration_Residents_Update_FloorOutOfRange_Returns422(t *testing.T) {
 func crudRoundTrip(t *testing.T, router http.Handler, tok, base string, create, update map[string]any, check func(created, updated map[string]any)) {
 	t.Helper()
 	do := func(method, path string, body any) *httptest.ResponseRecorder {
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, authReq(method, path, tok, body))
-		return rec
+		return serve(router, method, path, tok, body)
 	}
 
 	rec := do(http.MethodPost, base, create)
@@ -333,13 +605,9 @@ func crudRoundTrip(t *testing.T, router http.Handler, tok, base string, create, 
 	if rec = do(http.MethodGet, base+"/"+id, nil); rec.Code != http.StatusOK {
 		t.Fatalf("get: expected 200, got %d", rec.Code)
 	}
-	if rec = do(http.MethodGet, base, nil); rec.Code != http.StatusOK {
-		t.Fatalf("list: expected 200, got %d", rec.Code)
-	}
-	var list []map[string]any
-	_ = json.NewDecoder(rec.Body).Decode(&list)
-	if len(list) != 1 {
-		t.Fatalf("list: expected 1 item, got %d", len(list))
+	list := decodePage(t, do(http.MethodGet, base, nil))
+	if len(list.Items) != 1 || list.Total != 1 {
+		t.Fatalf("list: expected 1 item, got %d (total %d)", len(list.Items), list.Total)
 	}
 
 	rec = do(http.MethodPut, base+"/"+id, update)

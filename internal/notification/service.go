@@ -4,29 +4,41 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/victorradael/condoguard/api/internal/authz"
+	"github.com/victorradael/condoguard/api/pkg/page"
 )
 
 // Service holds the business logic for the notification domain.
+//
+// Authorization: admins send, edit and delete notifications and see all of
+// them; other users only see the ones addressed to a unit or shop they own.
+// A notification the caller may not see is reported as not found.
 type Service struct {
-	repo Repository
+	repo  Repository
+	units authz.UnitResolver
 }
 
-func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+// NewService creates a notification Service. units resolves which units and
+// shops a non-admin caller owns.
+func NewService(repo Repository, units authz.UnitResolver) *Service {
+	return &Service{repo: repo, units: units}
 }
 
 // Create validates the request and persists the notification.
 // Business rules:
+//   - admins only
+//   - the author (createdById) is the authenticated user
 //   - message is required
-//   - createdById is required
 //   - at least one recipient (residentId or shopOwnerId) is required
-//   - new notifications start as unread
+//   - new notifications start unread for every recipient
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*Notification, error) {
+	p, err := authz.RequireAdmin(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if req.Message == "" {
 		return nil, fmt.Errorf("%w: message is required", ErrValidation)
-	}
-	if req.CreatedByID == "" {
-		return nil, fmt.Errorf("%w: createdById is required", ErrValidation)
 	}
 	if len(req.ResidentIDs) == 0 && len(req.ShopOwnerIDs) == 0 {
 		return nil, fmt.Errorf("%w: at least one recipient (residentId or shopOwnerId) is required", ErrValidation)
@@ -34,9 +46,8 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Notification,
 
 	n := &Notification{
 		Message:      req.Message,
-		CreatedByID:  req.CreatedByID,
+		CreatedByID:  p.UserID,
 		CreatedAt:    time.Now().UTC(),
-		Read:         false,
 		ResidentIDs:  req.ResidentIDs,
 		ShopOwnerIDs: req.ShopOwnerIDs,
 	}
@@ -53,17 +64,43 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Notification,
 	return n, nil
 }
 
+// GetByID returns the notification, with the caller's read state, if the
+// caller may see it; ErrNotFound otherwise.
 func (s *Service) GetByID(ctx context.Context, id string) (*Notification, error) {
-	return s.repo.FindByID(ctx, id)
+	p, scope, err := authz.ScopeFor(ctx, s.units)
+	if err != nil {
+		return nil, err
+	}
+	n, err := s.repo.FindByID(ctx, id, p.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if !scope.SeesAny(n.ResidentIDs, n.ShopOwnerIDs) {
+		return nil, ErrNotFound
+	}
+	return n, nil
 }
 
-func (s *Service) List(ctx context.Context) ([]*Notification, error) {
-	return s.repo.FindAll(ctx)
+// List returns one page of the notifications the caller may see, newest first.
+func (s *Service) List(ctx context.Context, pg page.Params) (page.Result[*Notification], error) {
+	p, scope, err := authz.ScopeFor(ctx, s.units)
+	if err != nil {
+		return page.Result[*Notification]{}, err
+	}
+	list, total, err := s.repo.FindAll(ctx, scope, p.UserID, pg)
+	if err != nil {
+		return page.Result[*Notification]{}, err
+	}
+	return page.New(list, pg, total), nil
 }
 
-// Update applies message and recipient list changes.
+// Update applies message and recipient list changes. Admins only.
 func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*Notification, error) {
-	n, err := s.repo.FindByID(ctx, id)
+	p, err := authz.RequireAdmin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	n, err := s.repo.FindByID(ctx, id, p.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -84,30 +121,35 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*No
 	return n, nil
 }
 
-// MarkAsRead transitions the notification to the read state.
-// Business rule: the operation is idempotent — calling it on an already-read
-// notification must succeed without changing ReadAt.
+// MarkAsRead records that the caller read the notification.
+// Business rules: only users who can see the notification may mark it; the
+// read state is per user (one recipient reading it does not mark it for the
+// others); the operation is idempotent — the first ReadAt is kept.
 func (s *Service) MarkAsRead(ctx context.Context, id string) (*Notification, error) {
-	n, err := s.repo.FindByID(ctx, id)
+	n, err := s.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-
 	if n.Read {
-		// Already read — return as-is (idempotent).
 		return n, nil
 	}
 
-	now := time.Now().UTC()
-	n.Read = true
-	n.ReadAt = &now
-
-	if err := s.repo.Update(ctx, n); err != nil {
+	p, err := authz.FromContext(ctx)
+	if err != nil {
 		return nil, err
 	}
+	at, err := s.repo.MarkRead(ctx, id, p.UserID)
+	if err != nil {
+		return nil, err
+	}
+	n.Read, n.ReadAt = true, &at
 	return n, nil
 }
 
+// Delete removes the notification. Admins only.
 func (s *Service) Delete(ctx context.Context, id string) error {
+	if _, err := authz.RequireAdmin(ctx); err != nil {
+		return err
+	}
 	return s.repo.Delete(ctx, id)
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/victorradael/condoguard/api/internal/db"
 	"github.com/victorradael/condoguard/api/internal/db/dbgen"
 	"github.com/victorradael/condoguard/api/internal/tenant"
+	"github.com/victorradael/condoguard/api/pkg/page"
 )
 
 type postgresRepository struct {
@@ -60,20 +61,40 @@ func (r *postgresRepository) FindByID(ctx context.Context, id string) (*Expense,
 }
 
 // FindAll lists expenses ordered by due date, optionally within [From, To].
-func (r *postgresRepository) FindAll(ctx context.Context, f Filter) ([]*Expense, error) {
+func (r *postgresRepository) FindAll(ctx context.Context, f Filter, p page.Params) ([]*Expense, int64, error) {
 	condoID, err := tenant.CondominiumID(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	rows, err := r.q.ListExpenses(ctx, dbgen.ListExpensesParams{CondominiumID: condoID, DueFrom: f.From, DueTo: f.To})
+	restricted := !f.Scope.All
+	residentIDs, shopIDs := nonNil(f.Scope.Units.ResidentIDs), nonNil(f.Scope.Units.ShopOwnerIDs)
+	rows, err := r.q.ListExpenses(ctx, dbgen.ListExpensesParams{
+		CondominiumID: condoID, DueFrom: f.From, DueTo: f.To,
+		Restricted: restricted, ResidentIds: residentIDs, ShopOwnerIds: shopIDs,
+		PageLimit: p.Limit(), PageOffset: p.Offset(),
+	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
+	}
+	total, err := r.q.CountExpenses(ctx, dbgen.CountExpensesParams{
+		CondominiumID: condoID, DueFrom: f.From, DueTo: f.To,
+		Restricted: restricted, ResidentIds: residentIDs, ShopOwnerIds: shopIDs,
+	})
+	if err != nil {
+		return nil, 0, err
 	}
 	list := make([]*Expense, 0, len(rows))
 	for _, row := range rows {
 		list = append(list, fromRow(row))
 	}
-	return list, nil
+	return list, total, nil
+}
+
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 func (r *postgresRepository) Update(ctx context.Context, e *Expense) error {

@@ -47,12 +47,15 @@ func TestSpec_ContainsAllExpectedPaths(t *testing.T) {
 		"/health",
 		"/auth/register",
 		"/auth/login",
+		"/auth/refresh",
+		"/auth/logout",
+		"/users/me",
 		"/users",
 		"/users/{id}",
 		"/residents",
 		"/residents/{id}",
-		"/shopOwners",
-		"/shopOwners/{id}",
+		"/shop-owners",
+		"/shop-owners/{id}",
 		"/expenses",
 		"/expenses/{id}",
 		"/notifications",
@@ -87,7 +90,7 @@ func TestSpec_ProtectedRoutes_RequireBearerAuth(t *testing.T) {
 	protected := map[string]string{
 		"/users":         "get",
 		"/residents":     "get",
-		"/shopOwners":    "get",
+		"/shop-owners":   "get",
 		"/expenses":      "get",
 		"/notifications": "get",
 	}
@@ -115,18 +118,41 @@ func TestSpec_AllSchemas_Referenced(t *testing.T) {
 	spec := openapi.NewSpec()
 
 	required := []string{
-		"Error", "RegisterRequest", "LoginRequest", "LoginResponse",
+		"Error", "RegisterRequest", "LoginRequest", "RefreshRequest", "TokenPair",
 		"User", "CreateUserRequest", "UpdateUserRequest",
 		"Resident", "CreateResidentRequest", "UpdateResidentRequest",
 		"ShopOwner", "CreateShopOwnerRequest", "UpdateShopOwnerRequest",
 		"Expense", "CreateExpenseRequest", "UpdateExpenseRequest",
 		"Notification", "CreateNotificationRequest", "UpdateNotificationRequest",
+		"UserPage", "ResidentPage", "ShopOwnerPage", "ExpensePage", "NotificationPage",
 	}
 
 	for _, name := range required {
 		if _, ok := spec.Components.Schemas[name]; !ok {
 			t.Errorf("missing schema %q in components", name)
 		}
+	}
+}
+
+// The public sign-up contract must not offer a way to pick roles (item 1),
+// and notifications must not take their author from the body (item 5).
+func TestSpec_Security_NoClientControlledPrivilegeFields(t *testing.T) {
+	spec := openapi.NewSpec()
+	for schema, field := range map[string]string{
+		"RegisterRequest":           "roles",
+		"CreateNotificationRequest": "createdById",
+		"UpdateNotificationRequest": "createdById",
+	} {
+		if _, ok := spec.Components.Schemas[schema].Properties[field]; ok {
+			t.Errorf("%s must not expose %q", schema, field)
+		}
+	}
+}
+
+func TestSpec_HasCookieAuthScheme(t *testing.T) {
+	spec := openapi.NewSpec()
+	if _, ok := spec.Components.SecuritySchemes["cookieAuth"]; !ok {
+		t.Error("expected cookieAuth security scheme for the web client")
 	}
 }
 

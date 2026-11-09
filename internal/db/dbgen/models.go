@@ -27,10 +27,26 @@ type Notification struct {
 	Message       string
 	CreatedByID   string
 	CreatedAt     time.Time
-	Read          bool
-	ReadAt        *time.Time
 	ResidentIds   []string
 	ShopOwnerIds  []string
+}
+
+type NotificationRead struct {
+	NotificationID uuid.UUID
+	UserID         uuid.UUID
+	CondominiumID  string
+	ReadAt         time.Time
+}
+
+type RefreshToken struct {
+	ID            uuid.UUID
+	CondominiumID string
+	UserID        uuid.UUID
+	FamilyID      uuid.UUID
+	TokenHash     []byte
+	CreatedAt     time.Time
+	ExpiresAt     time.Time
+	RevokedAt     *time.Time
 }
 
 type Resident struct {

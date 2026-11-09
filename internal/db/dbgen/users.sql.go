@@ -11,6 +11,19 @@ import (
 	"github.com/google/uuid"
 )
 
+const countUsers = `-- name: CountUsers :one
+SELECT count(*)
+FROM users
+WHERE condominium_id = $1
+`
+
+func (q *Queries) CountUsers(ctx context.Context, condominiumID string) (int64, error) {
+	row := q.db.QueryRow(ctx, countUsers, condominiumID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteUser = `-- name: DeleteUser :execrows
 DELETE FROM users
 WHERE condominium_id = $1 AND id = $2
@@ -81,34 +94,6 @@ func (q *Queries) GetUserByID(ctx context.Context, arg GetUserByIDParams) (User,
 	return i, err
 }
 
-const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, condominium_id, username, email, password_hash, roles, created_at
-FROM users
-WHERE condominium_id = $1 AND username = $2
-ORDER BY created_at, id
-LIMIT 1
-`
-
-type GetUserByUsernameParams struct {
-	CondominiumID string
-	Username      string
-}
-
-func (q *Queries) GetUserByUsername(ctx context.Context, arg GetUserByUsernameParams) (User, error) {
-	row := q.db.QueryRow(ctx, getUserByUsername, arg.CondominiumID, arg.Username)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.CondominiumID,
-		&i.Username,
-		&i.Email,
-		&i.PasswordHash,
-		&i.Roles,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const insertUser = `-- name: InsertUser :one
 
 INSERT INTO users (condominium_id, username, email, password_hash, roles)
@@ -125,6 +110,7 @@ type InsertUserParams struct {
 }
 
 // Todas as consultas recebem condominium_id: nenhuma leitura ou escrita sem tenant.
+// O e-mail chega já normalizado (minúsculo, sem espaços) e é único na base toda.
 func (q *Queries) InsertUser(ctx context.Context, arg InsertUserParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, insertUser,
 		arg.CondominiumID,
@@ -143,10 +129,17 @@ SELECT id, condominium_id, username, email, password_hash, roles, created_at
 FROM users
 WHERE condominium_id = $1
 ORDER BY created_at, id
+LIMIT $3 OFFSET $2
 `
 
-func (q *Queries) ListUsers(ctx context.Context, condominiumID string) ([]User, error) {
-	rows, err := q.db.Query(ctx, listUsers, condominiumID)
+type ListUsersParams struct {
+	CondominiumID string
+	PageOffset    int32
+	PageLimit     int32
+}
+
+func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error) {
+	rows, err := q.db.Query(ctx, listUsers, arg.CondominiumID, arg.PageOffset, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
