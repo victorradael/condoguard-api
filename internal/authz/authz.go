@@ -220,3 +220,17 @@ func RequirePermission(perm Permission) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// MFARoles are the roles that must sign in with a second factor: whoever
+// manages or oversees a condominium (administradora, síndico, conselho).
+var MFARoles = []string{RoleAdministradora, RoleSindico, RoleConselho}
+
+// RequiresMFA reports whether any of the roles must use a second factor.
+func RequiresMFA(roles []string) bool {
+	for _, r := range roles {
+		if slices.Contains(MFARoles, r) {
+			return true
+		}
+	}
+	return false
+}

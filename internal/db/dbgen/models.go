@@ -10,6 +10,17 @@ import (
 	"github.com/google/uuid"
 )
 
+type AccountToken struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	Purpose   string
+	TokenHash []byte
+	IssuedBy  *uuid.UUID
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+}
+
 type Administrator struct {
 	ID        uuid.UUID
 	Name      string
@@ -79,6 +90,14 @@ type NotificationRead struct {
 	CondominiumID  uuid.UUID
 }
 
+type RecoveryCode struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	CodeHash  []byte
+	CreatedAt time.Time
+	UsedAt    *time.Time
+}
+
 type RefreshToken struct {
 	ID            uuid.UUID
 	UserID        uuid.UUID
@@ -111,9 +130,13 @@ type ShopOwner struct {
 }
 
 type User struct {
-	ID           uuid.UUID
-	Username     string
-	Email        string
-	PasswordHash string
-	CreatedAt    time.Time
+	ID              uuid.UUID
+	Username        string
+	Email           string
+	PasswordHash    string
+	CreatedAt       time.Time
+	EmailVerifiedAt *time.Time
+	TotpSecret      []byte
+	TotpEnabledAt   *time.Time
+	TotpLastStep    int64
 }

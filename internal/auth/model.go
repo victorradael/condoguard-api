@@ -8,6 +8,7 @@ type User struct {
 	Email         string   `json:"email"`
 	Password      string   `json:"-"` // bcrypt hash; never serialised
 	Roles         []string `json:"roles"`
+	EmailVerified bool     `json:"-"`
 }
 
 // Membership is the place of an account in one condominium.

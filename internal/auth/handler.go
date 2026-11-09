@@ -31,18 +31,38 @@ type CookieOptions struct {
 type Handler struct {
 	svc     *Service
 	cookies CookieOptions
+	authMW  func(http.Handler) http.Handler
 }
 
-// NewHandler creates an auth Handler.
+// NewHandler creates an auth Handler without the signed-in routes' middleware.
 func NewHandler(svc *Service, cookies CookieOptions) http.Handler {
-	h := &Handler{svc: svc, cookies: cookies}
+	return NewHandlerWith(svc, cookies, nil)
+}
+
+// NewHandlerWith creates an auth Handler; authMW validates the access token
+// of the routes that need a session (2FA management, sign out everywhere).
+func NewHandlerWith(svc *Service, cookies CookieOptions, authMW func(http.Handler) http.Handler) http.Handler {
+	h := &Handler{svc: svc, cookies: cookies, authMW: authMW}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /auth/register", h.register)
 	mux.HandleFunc("POST /auth/login", h.login)
 	mux.HandleFunc("POST /auth/refresh", h.refresh)
 	mux.HandleFunc("POST /auth/logout", h.logout)
-	return mux
+	mux.HandleFunc("POST /auth/2fa/setup", h.twoFactor(h.setup2FA))
+	mux.HandleFunc("POST /auth/2fa/enable", h.twoFactor(h.enable2FA))
+	mux.HandleFunc("POST /auth/2fa/verify", h.verify2FA)
+	mux.Handle("POST /auth/2fa/disable", h.authenticated(h.disable2FA))
+	mux.Handle("POST /auth/2fa/recovery-codes", h.authenticated(h.recoveryCodes))
+	mux.Handle("DELETE /auth/sessions", h.authenticated(h.revokeSessions))
+	return noStore(mux)
+}
+
+func noStore(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
@@ -82,10 +102,12 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tokens, err := h.svc.Login(r.Context(), req)
+	res, err := h.svc.Login(r.Context(), req)
 	if err != nil {
 		var need *CondominiumRequiredError
 		switch {
+		case errors.Is(err, ErrEmailNotVerified):
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "e-mail not verified", "code": "email_not_verified"})
 		case errors.As(err, &need):
 			writeJSON(w, http.StatusConflict, map[string]any{
 				"error":        "condominiumId is required: the account belongs to more than one condominium",
@@ -101,7 +123,14 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.respondTokens(w, tokens, req.UseCookies)
+	if res.Challenge != nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"mfaRequired": true, "stage": res.Challenge.Stage, "mfaToken": res.Challenge.Token,
+			"expiresIn": int(res.Challenge.ExpiresIn.Seconds()),
+		})
+		return
+	}
+	h.respondTokens(w, res.Tokens, req.UseCookies)
 }
 
 // refresh reads the refresh token from the body (app) or, when the body has
@@ -132,7 +161,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.svc.Logout(r.Context(), raw); err != nil {
+	if err := h.svc.Logout(r.Context(), raw, middleware.AccessTokenFromRequest(r)); err != nil {
 		internalError(w, r, err)
 		return
 	}
@@ -164,15 +193,34 @@ func (h *Handler) refreshToken(w http.ResponseWriter, r *http.Request) (raw stri
 }
 
 func (h *Handler) respondTokens(w http.ResponseWriter, t *Tokens, useCookies bool) {
+	h.respondTokensWith(w, t, useCookies, nil)
+}
+
+// respondTokensWith is respondTokens plus extra fields in the JSON body (the
+// recovery codes shown once when an enrolment finishes a login).
+func (h *Handler) respondTokensWith(w http.ResponseWriter, t *Tokens, useCookies bool, extra map[string]any) {
+	body := func(p TokenPair) map[string]any {
+		m := map[string]any{"tokenType": p.TokenType, "expiresIn": p.ExpiresIn, "roles": p.Roles}
+		if p.AccessToken != "" {
+			m["accessToken"] = p.AccessToken
+		}
+		if p.RefreshToken != "" {
+			m["refreshToken"] = p.RefreshToken
+		}
+		for k, v := range extra {
+			m[k] = v
+		}
+		return m
+	}
 	if !useCookies {
-		writeJSON(w, http.StatusOK, t.Pair())
+		writeJSON(w, http.StatusOK, body(t.Pair()))
 		return
 	}
 	h.setCookie(w, middleware.AccessCookie, t.AccessToken, "/", http.SameSiteLaxMode, t.AccessTTL)
 	h.setCookie(w, middleware.RefreshCookie, t.RefreshToken, h.refreshPath(), http.SameSiteStrictMode, t.RefreshTTL)
-	body := t.Pair()
-	body.AccessToken, body.RefreshToken = "", "" // scripts on the page never see the tokens
-	writeJSON(w, http.StatusOK, body)
+	pair := t.Pair()
+	pair.AccessToken, pair.RefreshToken = "", "" // scripts on the page never see the tokens
+	writeJSON(w, http.StatusOK, body(pair))
 }
 
 func (h *Handler) clearCookies(w http.ResponseWriter) {

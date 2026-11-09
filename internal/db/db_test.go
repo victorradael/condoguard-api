@@ -9,12 +9,16 @@ import (
 )
 
 var tables = []string{"users", "residents", "shop_owners", "expenses", "notifications", "refresh_tokens", "notification_reads",
-	"administrators", "condominiums", "memberships", "audit_log"}
+	"administrators", "condominiums", "memberships", "audit_log", "account_tokens", "recovery_codes"}
 
 // Tables that are not rows of one condominium: the accounts (global identity,
 // visible through the membership), the condominiums themselves and their
 // administradoras.
 var globalTables = map[string]bool{"users": true, "condominiums": true, "administrators": true}
+
+// Tables of one account (not of one condominium). account_tokens has no policy
+// at all: only the SECURITY DEFINER functions touch it.
+var accountTables = map[string]bool{"account_tokens": true, "recovery_codes": true}
 
 // goose up → down to zero → up again must work on an empty database.
 func TestMigrations_UpDownUp_FromScratch(t *testing.T) {
@@ -95,7 +99,7 @@ func TestSchema_EveryTableIsTenantScopedAndUnderRLS(t *testing.T) {
 		if !rls {
 			t.Errorf("table %s: row-level security is not enabled", table)
 		}
-		if globalTables[table] {
+		if globalTables[table] || accountTables[table] {
 			continue
 		}
 		switch {

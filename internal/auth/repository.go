@@ -66,19 +66,31 @@ type TokenStore interface {
 
 // ── In-memory (unit / integration without DB) ─────────────────────────────────
 
-type inMemoryRepository struct {
+// MemoryIdentity is the in-memory stand-in for the whole identity side of the
+// database: accounts and memberships (Repository), account tokens
+// (account.Store) and the second factor (MFAStore). Dev mode and tests only.
+type MemoryIdentity struct {
 	mu          sync.RWMutex
 	store       map[string]*User               // keyed by ID
 	memberships map[string]map[string][]string // user ID → condominium ID → roles
+	sec         map[string]*memSecurity        // user ID → second factor
+	tokens      map[string]*memAccountToken    // token hash → token
+	sessions    SessionRevoker                 // refresh-token store to revoke through, optional
+}
+
+// NewMemoryIdentity returns an empty MemoryIdentity.
+func NewMemoryIdentity() *MemoryIdentity {
+	return &MemoryIdentity{
+		store: make(map[string]*User), memberships: make(map[string]map[string][]string),
+		sec: make(map[string]*memSecurity), tokens: make(map[string]*memAccountToken),
+	}
 }
 
 // NewInMemoryRepository returns a thread-safe in-memory Repository.
 // Like the database, e-mails are unique across all condominiums.
-func NewInMemoryRepository() Repository {
-	return &inMemoryRepository{store: make(map[string]*User), memberships: make(map[string]map[string][]string)}
-}
+func NewInMemoryRepository() Repository { return NewMemoryIdentity() }
 
-func (r *inMemoryRepository) Save(ctx context.Context, user *User) error {
+func (r *MemoryIdentity) Save(ctx context.Context, user *User) error {
 	condoID, err := tenant.CondominiumID(ctx)
 	if err != nil {
 		return err
@@ -100,7 +112,7 @@ func (r *inMemoryRepository) Save(ctx context.Context, user *User) error {
 	return nil
 }
 
-func (r *inMemoryRepository) FindByEmail(_ context.Context, email string) (*User, error) {
+func (r *MemoryIdentity) FindByEmail(_ context.Context, email string) (*User, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -114,7 +126,7 @@ func (r *inMemoryRepository) FindByEmail(_ context.Context, email string) (*User
 	return nil, ErrNotFound
 }
 
-func (r *inMemoryRepository) Memberships(_ context.Context, userID string) ([]Membership, error) {
+func (r *MemoryIdentity) Memberships(_ context.Context, userID string) ([]Membership, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -126,7 +138,7 @@ func (r *inMemoryRepository) Memberships(_ context.Context, userID string) ([]Me
 	return out, nil
 }
 
-func (r *inMemoryRepository) FindByID(ctx context.Context, id string) (*User, error) {
+func (r *MemoryIdentity) FindByID(ctx context.Context, id string) (*User, error) {
 	condoID, err := tenant.CondominiumID(ctx)
 	if err != nil {
 		return nil, err

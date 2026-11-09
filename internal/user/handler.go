@@ -24,6 +24,8 @@ func NewHandler(svc *Service, authMW func(http.Handler) http.Handler) http.Handl
 	mux.HandleFunc("GET /users/{id}", h.getByID)
 	mux.HandleFunc("PUT /users/{id}", h.update)
 	mux.HandleFunc("DELETE /users/{id}", h.delete)
+	mux.HandleFunc("POST /users/{id}/account-links", h.issueLink)
+	mux.HandleFunc("DELETE /users/{id}/2fa", h.resetTwoFactor)
 
 	return authMW(mux)
 }

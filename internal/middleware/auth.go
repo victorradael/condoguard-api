@@ -2,8 +2,10 @@ package middleware
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/victorradael/condoguard/api/internal/tenant"
 	pkgjwt "github.com/victorradael/condoguard/api/pkg/jwt"
@@ -12,8 +14,9 @@ import (
 type contextKey string
 
 const (
-	userIDKey contextKey = "userID"
-	rolesKey  contextKey = "roles"
+	userIDKey  contextKey = "userID"
+	rolesKey   contextKey = "roles"
+	tokenIDKey contextKey = "tokenID"
 )
 
 // Cookie names used by the web client. Both are httpOnly: page scripts never
@@ -33,6 +36,13 @@ const (
 // Cookie-authenticated requests that change state must carry an Origin from
 // allowedOrigins (CSRF protection); otherwise they get 403.
 func Authenticate(jwtSvc *pkgjwt.Service, allowedOrigins ...string) func(http.Handler) http.Handler {
+	return AuthenticateWith(jwtSvc, nil, allowedOrigins...)
+}
+
+// AuthenticateWith is Authenticate that also refuses the access tokens on the
+// revocation list. If the list cannot be read the request is refused with 503:
+// a revoked session must never come back because Redis hiccuped.
+func AuthenticateWith(jwtSvc *pkgjwt.Service, revoked Revocations, allowedOrigins ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token, fromCookie, ok := extractToken(r)
@@ -52,7 +62,25 @@ func Authenticate(jwtSvc *pkgjwt.Service, allowedOrigins ...string) func(http.Ha
 				return
 			}
 
+			if revoked != nil {
+				var issued time.Time
+				if claims.IssuedAt != nil {
+					issued = claims.IssuedAt.Time
+				}
+				gone, err := revoked.IsRevoked(r.Context(), claims.ID, claims.UserID, issued)
+				if err != nil {
+					slog.ErrorContext(r.Context(), "revocation list unavailable", "error", err)
+					writeJSONError(w, http.StatusServiceUnavailable, "session check unavailable")
+					return
+				}
+				if gone {
+					writeJSONError(w, http.StatusUnauthorized, "session revoked")
+					return
+				}
+			}
+
 			ctx := context.WithValue(r.Context(), userIDKey, claims.UserID)
+			ctx = context.WithValue(ctx, tokenIDKey, claims.ID)
 			ctx = context.WithValue(ctx, rolesKey, claims.Roles)
 			ctx = tenant.WithCondominiumID(ctx, claims.CondominiumID)
 			ctx = tenant.WithUserID(ctx, claims.UserID)
@@ -75,6 +103,22 @@ func RequireRole(role string) func(http.Handler) http.Handler {
 			writeJSONError(w, http.StatusForbidden, "insufficient role")
 		})
 	}
+}
+
+// TokenIDFromContext returns the jti of the access token that authenticated the request.
+func TokenIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(tokenIDKey).(string)
+	return id
+}
+
+// AccessTokenFromRequest returns the access token the request carries (header
+// first, cookie second) without validating it. Logout uses it to revoke the
+// token it finds.
+func AccessTokenFromRequest(r *http.Request) string {
+	if t, _, ok := extractToken(r); ok {
+		return t
+	}
+	return ""
 }
 
 // UserIDFromContext retrieves the authenticated user ID from the context.

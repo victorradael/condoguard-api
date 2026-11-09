@@ -204,3 +204,31 @@ func TestJWT_ExtractUserID_ValidToken(t *testing.T) {
 		t.Errorf("expected 'user-abc', got %q", userID)
 	}
 }
+
+func TestStepTokens_AreNotAccessTokens(t *testing.T) {
+	svc := jwt.MustNewService(testSecret)
+	step, err := svc.GenerateStepToken("u1", "c1", jwt.PurposeMFAVerify, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ValidateToken(step); err == nil {
+		t.Error("a step token must not pass as an access token")
+	}
+	if c, err := svc.ValidateStepToken(step, jwt.PurposeMFAVerify); err != nil || c.UserID != "u1" || c.CondominiumID != "c1" || len(c.Roles) != 0 {
+		t.Errorf("step token: %+v, %v", c, err)
+	}
+	if _, err := svc.ValidateStepToken(step, jwt.PurposeMFAEnroll); err == nil {
+		t.Error("a verify token must not pass as an enroll token")
+	}
+	access, _ := svc.GenerateToken("u1", "c1", []string{"morador"})
+	if _, err := svc.ValidateStepToken(access, jwt.PurposeMFAVerify, jwt.PurposeMFAEnroll); err == nil {
+		t.Error("an access token must not pass as a step token")
+	}
+	expired, _ := svc.GenerateStepToken("u1", "c1", jwt.PurposeMFAVerify, -time.Minute)
+	if _, err := svc.ValidateStepToken(expired, jwt.PurposeMFAVerify); err == nil {
+		t.Error("an expired step token must be refused")
+	}
+	if _, err := svc.GenerateStepToken("", "c1", jwt.PurposeMFAVerify, time.Minute); err == nil {
+		t.Error("expected an error for an empty user")
+	}
+}

@@ -67,6 +67,22 @@ type Service struct {
 	tokens     TokenStore
 	jwtSvc     *pkgjwt.Service
 	refreshTTL time.Duration
+	mfa        *MFA               // nil = no second factor (tests, tools)
+	revoked    revocations        // nil = access tokens are not revocable
+	sessions   SessionRevoker     // nil = only the family of the logout is revoked
+	verified   bool               // require a confirmed e-mail to sign in
+	notify     VerificationSender // e-mails the verification link after sign-up
+}
+
+// VerificationSender e-mails a freshly created account its verification link.
+type VerificationSender interface {
+	SendVerification(ctx context.Context, userID, email, username string)
+}
+
+// WithVerificationMail makes sign-up send the verification link.
+func (s *Service) WithVerificationMail(n VerificationSender) *Service {
+	s.notify = n
+	return s
 }
 
 // NewService creates an auth Service. refreshTTL <= 0 means DefaultRefreshTTL.
@@ -106,12 +122,26 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) error {
 		Password: hashed,
 		Roles:    []string{authz.RoleMorador},
 	}
-	return s.repo.Save(ctx, user)
+	if err = s.repo.Save(ctx, user); err != nil {
+		return err
+	}
+	if s.notify != nil {
+		s.notify.SendVerification(ctx, user.ID, user.Email, user.Username)
+	}
+	return nil
 }
 
-// Login validates credentials and opens a session (access + refresh token)
-// in one condominium: the requested one, or the only one of the account.
-func (s *Service) Login(ctx context.Context, req LoginRequest) (*Tokens, error) {
+// RequireVerifiedEmail makes Login refuse accounts whose e-mail was never confirmed.
+func (s *Service) RequireVerifiedEmail() *Service {
+	s.verified = true
+	return s
+}
+
+// Login validates credentials and, when nothing else is asked, opens a
+// session (access + refresh token) in one condominium: the requested one, or
+// the only one of the account. When the account has a second factor, or its
+// role requires one, the result is a Challenge instead of tokens.
+func (s *Service) Login(ctx context.Context, req LoginRequest) (*LoginResult, error) {
 	if req.Email == "" {
 		return nil, fmt.Errorf("%w: email is required", ErrValidation)
 	}
@@ -139,12 +169,29 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*Tokens, error) 
 		return nil, ErrInvalidCredentials
 	}
 
+	if s.verified && !user.EmailVerified {
+		return nil, ErrEmailNotVerified
+	}
+
 	member, err := s.membershipFor(ctx, user.ID, req.CondominiumID)
 	if err != nil {
 		return nil, err
 	}
 	user.Roles, user.CondominiumID = member.Roles, member.CondominiumID
-	return s.issue(tenant.WithCondominiumID(ctx, member.CondominiumID), user, uuid.NewString())
+	ctx = tenant.WithUserID(tenant.WithCondominiumID(ctx, member.CondominiumID), user.ID)
+
+	ch, err := s.challenge(ctx, user, member.Roles)
+	if err != nil {
+		return nil, err
+	}
+	if ch != nil {
+		return &LoginResult{Challenge: ch}, nil
+	}
+	t, err := s.issue(ctx, user, uuid.NewString())
+	if err != nil {
+		return nil, err
+	}
+	return &LoginResult{Tokens: t}, nil
 }
 
 // membershipFor picks the condominium of a login. A condominium the account
@@ -206,9 +253,17 @@ func (s *Service) Refresh(ctx context.Context, raw string) (*Tokens, error) {
 	return s.issue(ctx, user, sess.FamilyID)
 }
 
-// Logout revokes the session the refresh token belongs to. Unknown tokens
-// are ignored: logging out is always successful for the caller.
-func (s *Service) Logout(ctx context.Context, raw string) error {
+// Logout revokes the session the refresh token belongs to and, when it is
+// given and valid, the access token too. Unknown tokens are ignored: logging
+// out is always successful for the caller.
+func (s *Service) Logout(ctx context.Context, raw, accessToken string) error {
+	if accessToken != "" && s.revoked != nil {
+		if c, err := s.jwtSvc.ValidateToken(accessToken); err == nil && c.ExpiresAt != nil {
+			if err := s.revoked.Revoke(ctx, c.ID, c.ExpiresAt.Time); err != nil {
+				return err
+			}
+		}
+	}
 	if raw == "" {
 		return nil
 	}

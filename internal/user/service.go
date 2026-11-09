@@ -15,8 +15,10 @@ import (
 
 // Service holds the business logic for the user domain.
 type Service struct {
-	repo  Repository
-	trail audit.Trail
+	repo      Repository
+	trail     audit.Trail
+	links     Links
+	twoFactor TwoFactor
 }
 
 const auditResource = "user"

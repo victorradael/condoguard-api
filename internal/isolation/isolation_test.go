@@ -229,7 +229,7 @@ func TestRLS_FailsClosedWithoutATenant(t *testing.T) {
 		"unknown tenant": tenant.WithCondominiumID(context.Background(), "c0000000-0000-4000-8000-00000000000c"),
 		"sql in tenant":  tenant.WithCondominiumID(context.Background(), a+"' OR '1'='1"),
 	}
-	tables := []string{"users", "condominiums", "administrators", "memberships", "residents", "shop_owners", "expenses", "notifications", "notification_reads", "refresh_tokens", "audit_log"}
+	tables := []string{"users", "condominiums", "administrators", "memberships", "residents", "shop_owners", "expenses", "notifications", "notification_reads", "refresh_tokens", "audit_log", "account_tokens", "recovery_codes"}
 	for name, ctx := range contexts {
 		for _, table := range tables {
 			if n := count(t, f.env.Pool, ctx, "SELECT count(*) FROM "+table); n != 0 {
@@ -306,5 +306,55 @@ func TestRLS_TheAPIRoleIsSubjectToThePolicies(t *testing.T) {
 	}
 	if super || bypass || owned != 0 {
 		t.Errorf("the API role must be a plain role that owns nothing: super=%v bypassrls=%v owns=%d", super, bypass, owned)
+	}
+}
+
+// 00004: recovery codes belong to their owner (the condominium's staff may
+// only delete them, when resetting a 2FA); the token table is closed to the API role.
+func TestRLS_AccountSecurityTables(t *testing.T) {
+	f, a, b := setup(t)
+	ctx := context.Background()
+	for condo, uid := range f.userIDs {
+		if _, err := f.env.Admin.Exec(ctx, `INSERT INTO recovery_codes (user_id, code_hash) VALUES ($1, decode(md5($2), 'hex'))`, uid, uid); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.env.Admin.Exec(ctx, `INSERT INTO account_tokens (user_id, purpose, token_hash, expires_at) VALUES ($1, 'password_reset', decode(md5($2), 'hex'), now() + interval '1 hour')`, uid, condo); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scoped := db.NewScoped(f.env.Pool)
+
+	// Another member's codes are invisible and cannot be forged or spent.
+	as := asUser(f, a)
+	if n := count(t, f.env.Pool, as, "SELECT count(*) FROM recovery_codes"); n != 1 {
+		t.Errorf("user of A sees %d recovery codes, want only their own", n)
+	}
+	if _, err := scoped.Exec(as, `INSERT INTO recovery_codes (user_id, code_hash) VALUES ($1, '\x01')`, f.userIDs[b]); err == nil {
+		t.Error("user of A planted a recovery code for B")
+	}
+	if tag, _ := scoped.Exec(as, `UPDATE recovery_codes SET used_at = now()`); tag.RowsAffected() != 1 {
+		t.Errorf("update reached %d codes, want only A's 1", tag.RowsAffected())
+	}
+	if n := adminCount(t, f, `SELECT count(*) FROM recovery_codes WHERE used_at IS NOT NULL AND user_id = $1`, f.userIDs[b]); n != 0 {
+		t.Error("B's recovery code was spent by a user of A")
+	}
+
+	// The tokens are not readable or writable by the API role at all.
+	if n := count(t, f.env.Pool, as, "SELECT count(*) FROM account_tokens"); n != 0 {
+		t.Errorf("API role reads %d account tokens, want none", n)
+	}
+	if _, err := scoped.Exec(as, `INSERT INTO account_tokens (user_id, purpose, token_hash, expires_at) VALUES ($1, 'password_reset', '\x02', now() + interval '1 hour')`, f.userIDs[a]); err == nil {
+		t.Error("API role inserted an account token directly")
+	}
+	if tag, _ := scoped.Exec(as, `UPDATE account_tokens SET used_at = NULL`); tag.RowsAffected() != 0 {
+		t.Error("API role updated account tokens directly")
+	}
+
+	// A member of A cannot delete the codes of B; staff of A deletes only A's.
+	if tag, _ := scoped.Exec(as, `DELETE FROM recovery_codes`); tag.RowsAffected() != 1 {
+		t.Errorf("delete removed %d codes, want only A's 1", tag.RowsAffected())
+	}
+	if n := adminCount(t, f, `SELECT count(*) FROM recovery_codes WHERE user_id = $1`, f.userIDs[b]); n != 1 {
+		t.Error("B's recovery code was deleted by a user of A")
 	}
 }

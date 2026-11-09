@@ -57,16 +57,17 @@ func (r *postgresRepository) FindByEmail(ctx context.Context, email string) (*Us
 		id                           uuid.UUID
 		username, mail, passwordHash string
 		createdAt                    time.Time
+		verifiedAt                   *time.Time
 	)
-	err := r.pool.QueryRow(ctx, `SELECT id, username, email, password_hash, created_at FROM auth_user_by_email($1)`, email).
-		Scan(&id, &username, &mail, &passwordHash, &createdAt)
+	err := r.pool.QueryRow(ctx, `SELECT id, username, email, password_hash, created_at, email_verified_at FROM auth_user_by_email($1)`, email).
+		Scan(&id, &username, &mail, &passwordHash, &createdAt, &verifiedAt)
 	if db.IsNoRows(err) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &User{ID: id.String(), Username: username, Email: mail, Password: passwordHash}, nil
+	return &User{ID: id.String(), Username: username, Email: mail, Password: passwordHash, EmailVerified: verifiedAt != nil}, nil
 }
 
 func (r *postgresRepository) Memberships(ctx context.Context, userID string) ([]Membership, error) {
