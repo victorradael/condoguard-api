@@ -47,8 +47,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-condoguard}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
       POSTGRES_DB: ${POSTGRES_DB:-condoguard}
+    # A imagem 18 guarda os dados em /var/lib/postgresql/18/docker e recusa
+    # subir com o volume em .../data. Volume novo: o de 17 não é reaproveitado
+    # (dados da POC; recrie com `make migrate-up`).
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres18_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -85,7 +88,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_HOST_AUTH_METHOD: trust
     tmpfs:
-      - /var/lib/postgresql/data
+      - /var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 2s
@@ -107,5 +110,5 @@ services:
       retries: 20
 
 volumes:
-  postgres_data:
+  postgres18_data:
   redis_data:

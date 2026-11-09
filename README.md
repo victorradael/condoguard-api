@@ -12,8 +12,8 @@ REST API do CondoGuard — sistema de gestão financeira e administrativa de con
 |--------|-----------|
 | Linguagem | Go 1.26+ |
 | HTTP | `net/http` (stdlib, Go 1.22+ method routing) |
-| Banco de dados | PostgreSQL 17 (`pgx` + consultas tipadas com `sqlc`, migrações `goose`) |
-| Cache / limites | Redis 7 (`go-redis`) — limite de tentativas de login |
+| Banco de dados | PostgreSQL 18 (`pgx` + consultas tipadas com `sqlc`, migrações `goose`) |
+| Cache / limites | Redis 8 (`go-redis`) — limite de tentativas de login |
 | Autenticação | JWT HS256 de curta duração + refresh token rotativo (cookie httpOnly no web, bearer no app) |
 | Senhas | bcrypt (`golang.org/x/crypto`) |
 | Logging | `log/slog` (stdlib) |
@@ -100,7 +100,7 @@ docker compose exec -T -e ADMIN_EMAIL=sindico@exemplo.com -e ADMIN_USERNAME=sind
 # Testes unitários (sem banco; os de PostgreSQL são pulados)
 make test-unit
 
-# Todos os testes, com PostgreSQL 17 e Redis 7 de verdade em container
+# Todos os testes, com PostgreSQL 18 e Redis 8 de verdade em container
 make test-db-up        # postgres-test em 127.0.0.1:55432, redis-test em 127.0.0.1:56379
 make test-integration  # usa TEST_DATABASE_URL e TEST_REDIS_URL
 make test-db-down
