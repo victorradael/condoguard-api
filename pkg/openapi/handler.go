@@ -54,7 +54,7 @@ const (
 const swaggerUIInitJS = `
     window.onload = function () {
       SwaggerUIBundle({
-        url: "/openapi.json",
+        url: "openapi.json",
         dom_id: "#swagger-ui",
         presets: [
           SwaggerUIBundle.presets.apis,
@@ -111,7 +111,8 @@ func inlineHash(block string) string {
 }
 
 // UIHandler returns an http.Handler that serves the Swagger UI page under a
-// strict CSP. It reads the spec from GET /openapi.json.
+// strict CSP. It reads the spec from openapi.json next to the page, so it
+// also works when a proxy mounts the API under a prefix (/api/docs).
 func UIHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", SwaggerUICSP)

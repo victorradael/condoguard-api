@@ -23,7 +23,9 @@ func NewSpec() *Spec {
 			},
 		},
 		Servers: []Server{
-			{URL: "/", Description: "Current server"},
+			// Relative to the document, so "Try it out" also works behind a proxy
+			// prefix (/api/openapi.json → /api/...).
+			{URL: ".", Description: "Current server"},
 		},
 		Tags: []Tag{
 			{Name: "Auth", Description: "Cadastro, login e sessão"},
