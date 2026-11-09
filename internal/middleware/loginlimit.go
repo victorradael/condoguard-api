@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/victorradael/condoguard/api/pkg/ratelimit"
 )
@@ -122,12 +121,14 @@ func readLoginUsername(r *http.Request) (username string, ok bool) {
 }
 
 // loginKey identifies the (IP, username) pair without storing the raw username.
+// The username is compared byte for byte, like the user lookup: "ana" and "ANA"
+// are different accounts, so a login to one must never reset the other's counter.
 func loginKey(r *http.Request, username string) string {
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		ip = r.RemoteAddr
 	}
-	sum := sha256.Sum256([]byte(strings.ToLower(username)))
+	sum := sha256.Sum256([]byte(username))
 	return ip + ":" + hex.EncodeToString(sum[:16])
 }
 

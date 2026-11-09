@@ -1,6 +1,7 @@
 package middleware_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,7 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/victorradael/condoguard/api/internal/auth"
 	"github.com/victorradael/condoguard/api/internal/middleware"
+	pkgjwt "github.com/victorradael/condoguard/api/pkg/jwt"
 	"github.com/victorradael/condoguard/api/pkg/ratelimit"
 )
 
@@ -65,9 +68,10 @@ func TestLoginLimit_BlocksAfterMaxFailures(t *testing.T) {
 	if rec := login(h, "10.0.0.2", "ana", "ok"); rec.Code != http.StatusOK {
 		t.Errorf("other IP: expected 200, got %d", rec.Code)
 	}
-	// Username matching is case-insensitive.
-	if rec := login(h, "10.0.0.1", "ANA", "ok"); rec.Code != http.StatusTooManyRequests {
-		t.Errorf("case variant: expected 429, got %d", rec.Code)
+	// Usernames are matched byte for byte, like the user lookup: "ANA" is
+	// another account and has its own counter.
+	if rec := login(h, "10.0.0.1", "ANA", "ok"); rec.Code != http.StatusOK {
+		t.Errorf("case variant: expected 200, got %d", rec.Code)
 	}
 }
 
@@ -189,6 +193,53 @@ func TestLoginLimit_OwnLoginDoesNotResetVictimCounter(t *testing.T) {
 		}
 		send(`{"username":"attacker","password":"ok"} x`)
 		send(`{"username":"attacker","password":"ok"}`)
+	}
+	if victimAttempts > 5 || !got429 {
+		t.Errorf("%d attempts against the victim reached the handler (max 5), 429 seen: %v", victimAttempts, got429)
+	}
+}
+
+// Regression (FAB-11 B2b): with the real auth handler, logging in to a
+// case variant of the victim's username ("VICTIM") must not reset the counter
+// used against "victim". Usernames are not unique and the lookup is
+// case-sensitive, so the attacker can register the variant themselves.
+func TestLoginLimit_CaseVariantLoginDoesNotResetVictimCounter(t *testing.T) {
+	authHandler := auth.NewHandler(auth.NewService(auth.NewInMemoryRepository(),
+		pkgjwt.NewService("dGVzdC1zZWNyZXQta2V5LWZvci11bml0LXRlc3Rpbmc=")))
+	mux := http.NewServeMux()
+	mux.Handle("POST /auth/login", middleware.LoginLimit(ratelimit.NewMemory(5, time.Minute))(authHandler))
+	mux.Handle("/auth/", authHandler)
+
+	post := func(path string, body any) int {
+		b, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(b))
+		req.RemoteAddr = "10.0.0.9:1"
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	for _, u := range []string{"victim", "VICTIM"} {
+		code := post("/auth/register", map[string]any{
+			"username": u, "email": u + "@example.com", "password": "S3cr3t!Pass", "roles": []string{"ROLE_USER"},
+		})
+		if code != http.StatusCreated {
+			t.Fatalf("register %s: expected 201, got %d", u, code)
+		}
+	}
+
+	victimAttempts, got429 := 0, false
+	for i := 0; i < 20; i++ {
+		for j := 0; j < 4; j++ {
+			switch post("/auth/login", map[string]string{"username": "victim", "password": "guess"}) {
+			case http.StatusTooManyRequests:
+				got429 = true
+			default:
+				victimAttempts++
+			}
+		}
+		if code := post("/auth/login", map[string]string{"username": "VICTIM", "password": "S3cr3t!Pass"}); code != http.StatusOK {
+			t.Fatalf("attacker login: expected 200, got %d", code)
+		}
 	}
 	if victimAttempts > 5 || !got429 {
 		t.Errorf("%d attempts against the victim reached the handler (max 5), 429 seen: %v", victimAttempts, got429)
