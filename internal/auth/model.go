@@ -2,11 +2,11 @@ package auth
 
 // User represents a CondoGuard user stored in the database.
 type User struct {
-	ID       string   `json:"id"       bson:"_id,omitempty"`
-	Username string   `json:"username" bson:"username"`
-	Email    string   `json:"email"    bson:"email"`
-	Password string   `json:"-"        bson:"password"` // bcrypt hash; never serialised
-	Roles    []string `json:"roles"    bson:"roles"`
+	ID       string   `json:"id"`
+	Username string   `json:"username"`
+	Email    string   `json:"email"`
+	Password string   `json:"-"` // bcrypt hash; never serialised
+	Roles    []string `json:"roles"`
 }
 
 // RegisterRequest is the payload for POST /auth/register.

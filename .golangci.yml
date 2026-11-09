@@ -1,32 +1,49 @@
+version: "2"
 run:
-  timeout: 5m
   tests: true
-
 linters:
   enable:
-    - errcheck
-    - gosimple
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
+    - misspell
+    - prealloc
+    - unconvert
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: false # explicit `_ =` is the codebase idiom for ignored writes
+    govet:
+      enable-all: true
+      disable:
+        # Reordering fields would change the JSON field order of the API.
+        - fieldalignment
+    misspell:
+      # The domain vocabulary is Portuguese ("Momento", ...).
+      ignore-rules:
+        - momento
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
     - gofmt
     - goimports
-    - misspell
-    - unconvert
-    - prealloc
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-  gofmt:
-    simplify: true
-  govet:
-    enable-all: true
-
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
+  settings:
+    gofmt:
+      simplify: true
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

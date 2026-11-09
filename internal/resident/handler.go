@@ -85,6 +85,8 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "resident not found")
 		case errors.Is(err, ErrDuplicate):
 			writeError(w, http.StatusConflict, "unit number already exists in this condominium")
+		case errors.Is(err, ErrValidation):
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
 		default:
 			writeError(w, http.StatusInternalServerError, "internal error")
 		}

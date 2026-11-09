@@ -1,52 +1,96 @@
+# Ambiente local da API. Não há segredos padrão: defina POSTGRES_PASSWORD,
+# REDIS_PASSWORD e JWT_SECRET_KEY no .env (veja .env.example) antes de subir.
+# As portas ficam presas em 127.0.0.1 — nada é exposto para a rede.
+
 services:
   api:
     build: .
     container_name: condoguard-api
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
-      - PORT=8080
-      - MONGODB_URI=mongodb://${MONGO_USER:-root}:${MONGO_PASSWORD:-secret}@mongodb:27017/${MONGO_DB:-condoguard}?authSource=admin
-      - MONGO_DB=${MONGO_DB:-condoguard}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-Y2hhbmdlLW1lLWluLXByb2R1Y3Rpb24=}
-      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      PORT: "8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:-condoguard}:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/${POSTGRES_DB:-condoguard}?sslmode=disable
+      DB_MIGRATE_ON_START: "true"
+      REDIS_URL: redis://:${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}@redis:6379/0
+      DEFAULT_CONDOMINIUM_ID: ${DEFAULT_CONDOMINIUM_ID:-default}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?defina JWT_SECRET_KEY no .env}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
     depends_on:
-      mongodb:
+      postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
 
-  mongodb:
-    image: mongo:7
-    container_name: condoguard-mongo
+  postgres:
+    image: postgres:17-alpine
+    container_name: condoguard-postgres
     ports:
-      - "27017:27017"
+      - "127.0.0.1:5432:5432"
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-root}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-secret}
-      MONGO_INITDB_DATABASE: ${MONGO_DB:-condoguard}
+      POSTGRES_USER: ${POSTGRES_USER:-condoguard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      POSTGRES_DB: ${POSTGRES_DB:-condoguard}
     volumes:
-      - mongo_data:/data/db
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  mongodb-test:
-    image: mongo:7
-    container_name: condoguard-mongo-test
-    ports:
-      - "27018:27017"
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: secret
-      MONGO_INITDB_DATABASE: condoguard_test
-    tmpfs:
-      - /data/db
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: condoguard-redis
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # Bancos descartáveis para testes (dados em memória, só em 127.0.0.1).
+  # Uso: make test-db-up && make test-integration
+  postgres-test:
+    image: postgres:17-alpine
+    container_name: condoguard-postgres-test
+    profiles: ["test"]
+    ports:
+      - "127.0.0.1:55432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  # No password on purpose: test-only, ephemeral and bound to 127.0.0.1.
+  # Never reuse this service (or its settings) outside local tests.
+  redis-test:
+    image: redis:7-alpine
+    container_name: condoguard-redis-test
+    profiles: ["test"]
+    ports:
+      - "127.0.0.1:56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
 
 volumes:
-  mongo_data:
+  postgres_data:
+  redis_data:

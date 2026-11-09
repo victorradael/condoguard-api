@@ -9,6 +9,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/victorradael/condoguard/api/internal/db/dbtest"
+	"github.com/victorradael/condoguard/api/internal/tenant"
+
 	"github.com/victorradael/condoguard/api/internal/auth"
 	pkgjwt "github.com/victorradael/condoguard/api/pkg/jwt"
 	"github.com/victorradael/condoguard/api/pkg/password"
@@ -205,29 +208,19 @@ func TestLogin_MissingUsername_Returns422(t *testing.T) {
 	}
 }
 
-// ── Integration (requires MONGODB_URI env) ────────────────────────────────────
+// ── Integration (PostgreSQL; requires TEST_DATABASE_URL) ───────────────────────
 
 func TestIntegration_Register_Login_RoundTrip(t *testing.T) {
-	uri := os.Getenv("MONGODB_URI")
-	if uri == "" {
-		t.Skip("MONGODB_URI not set — skipping integration test")
-	}
+	pool := dbtest.NewPool(t)
 
 	secret := os.Getenv("JWT_SECRET_KEY")
 	if secret == "" {
 		secret = "dGVzdC1zZWNyZXQta2V5LWZvci1pbnRlZ3JhdGlvbg=="
 	}
 
-	ctx := context.Background()
-	mongoRepo, err := auth.NewMongoRepository(ctx, uri, "condoguard_test")
-	if err != nil {
-		t.Fatalf("mongo connect: %v", err)
-	}
-	defer mongoRepo.Cleanup(ctx)
-
 	jwtSvc := pkgjwt.NewService(secret)
-	svc := auth.NewService(mongoRepo, jwtSvc)
-	h := auth.NewHandler(svc)
+	svc := auth.NewService(auth.NewPostgresRepository(pool), jwtSvc)
+	h := tenant.Middleware("condo-test")(auth.NewHandler(svc))
 
 	// register
 	rec := postJSON(h, "/auth/register", map[string]any{

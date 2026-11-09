@@ -177,7 +177,7 @@ Fase D — Descomissionamento
 
 ### Checklist pré-cutover
 
-- [ ] Todos os testes de paridade passando com `MONGODB_URI` real
+- [ ] Todos os testes de paridade passando com PostgreSQL real (`TEST_DATABASE_URL`)
 - [ ] Clientes web atualizados para os novos campos de payload (ver seção 2)
 - [ ] Clientes mobile atualizados para os novos campos de payload
 - [ ] `condominiumId` adicionado em todas as criações de residente
@@ -185,7 +185,7 @@ Fase D — Descomissionamento
 - [ ] `amountCents` substituindo `amount` nas despesas
 - [ ] `dueDate` substituindo `date` nas despesas
 - [ ] Parsers de resposta adaptados para campos de ID simples
-- [ ] Variáveis de ambiente configuradas: `MONGODB_URI`, `JWT_SECRET_KEY`, `PORT`
+- [ ] Variáveis de ambiente configuradas: `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET_KEY`, `PORT`
 - [ ] `JWT_SECRET_KEY` idêntica entre Java e Go (mesma chave — tokens existentes continuam válidos)
 - [ ] Docker image do servidor Go publicada no registry
 - [ ] Alertas de erro 5xx configurados no load balancer
@@ -199,16 +199,20 @@ Se erros 5xx > 1% em 5 minutos após cutover:
 
 ---
 
-## 5. Compatibilidade de Dados (MongoDB)
+## 5. Dados (PostgreSQL, desde a Fase 1a-db)
 
-A API Go usa as **mesmas coleções** que a API Java (`users`, `residents`, `shopOwners`,
-`expenses`, `notifications`). Os documentos existentes são lidos sem migração para campos
-como `id`, `username`, `email`, `password`, `roles`, `unitNumber`, `floor`, `message`,
-`shopName`.
+O MongoDB saiu do projeto. A fonte da verdade é o PostgreSQL 17 (esquema em
+`internal/db/migrations/`). Não havia dados de produção, então não houve migração de dados.
 
-Campos novos introduzidos pela API Go (`condominiumId`, `cnpj`, `amountCents`, `dueDate`,
-`residentIds`, `shopOwnerIds`, `createdById`, `read`, `readAt`) serão `null` ou ausentes
-em documentos antigos — a API Go os tratará como zero-values e não retornará erros de leitura.
+Mudanças visíveis para clientes, todas dentro do contrato OpenAPI (`id` é `string`):
+- IDs passam de ObjectID (24 hex) para UUID. Um ID mal formado responde 404, como antes.
+- `POST /auth/login` pode responder `429` com `Retry-After` após falhas repetidas (limite no Redis).
+- `POST /auth/login` responde `400` (`invalid JSON`) quando o corpo não é exatamente um valor JSON
+  (por exemplo, com dados depois do objeto) ou passa de 64 KiB. Antes o handler ignorava o que
+  vinha depois do primeiro objeto.
+- `PUT /residents/{id}` e `PUT /shopOwners/{id}` respondem `422` para `floor` fora do intervalo
+  de `int32`, em vez de `500`.
 
-**Recomendação:** executar script de migração para preencher `condominiumId` com um valor
-padrão nos documentos de `residents` existentes antes do cutover.
+O campo `condominiumId` de `residents` continua texto livre e guardado como chegou
+(`residents.condominium_ref`); a unicidade de `unitNumber` segue por esse valor. Em todas as
+tabelas, `condominium_id` (tenant) vem de `DEFAULT_CONDOMINIUM_ID` até a Fase 1b.

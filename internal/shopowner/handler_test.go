@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
+
+	"github.com/victorradael/condoguard/api/internal/db/dbtest"
+	"github.com/victorradael/condoguard/api/internal/tenant"
 
 	"github.com/victorradael/condoguard/api/internal/middleware"
 	"github.com/victorradael/condoguard/api/internal/shopowner"
@@ -259,12 +261,90 @@ func TestShopOwners_Delete_NonExistent_Returns404(t *testing.T) {
 	}
 }
 
-// ── Integration ───────────────────────────────────────────────────────────────
+// ── Integration (PostgreSQL; requires TEST_DATABASE_URL) ───────────────────────
 
 func TestIntegration_ShopOwners_CRUD(t *testing.T) {
-	uri := os.Getenv("MONGODB_URI")
-	if uri == "" {
-		t.Skip("MONGODB_URI not set — skipping integration test")
+	pool := dbtest.NewPool(t)
+	router := tenant.Middleware("condo-test")(shopowner.NewHandler(shopowner.NewService(shopowner.NewPostgresRepository(pool)), middleware.Authenticate(pkgjwt.NewService(handlerSecret))))
+
+	crudRoundTrip(t, router, validToken(t), "/shopOwners",
+		map[string]any{"shopName": "Padaria", "cnpj": "11222333000181", "floor": 0, "ownerId": "user-1"},
+		map[string]any{"shopName": "Padaria Nova", "floor": 1},
+		func(_, updated map[string]any) {
+			if updated["shopName"] != "Padaria Nova" {
+				t.Errorf("update not persisted: %v", updated)
+			}
+			if updated["cnpj"] != "11.222.333/0001-81" {
+				t.Errorf("expected formatted CNPJ, got %v", updated["cnpj"])
+			}
+		})
+}
+
+// Regression (FAB-11 N1): a floor outside int32 is a validation error, not a 500.
+func TestIntegration_ShopOwners_Update_FloorOutOfRange_Returns422(t *testing.T) {
+	pool := dbtest.NewPool(t)
+	router := tenant.Middleware("condo-test")(shopowner.NewHandler(shopowner.NewService(shopowner.NewPostgresRepository(pool)), middleware.Authenticate(pkgjwt.NewService(handlerSecret))))
+	tok := validToken(t)
+	id := fmt.Sprintf("%v", createShop(t, router, tok, "Banca", "11222333000181")["id"])
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, authReq(http.MethodPut, "/shopOwners/"+id, tok, map[string]any{
+		"shopName": "Banca",
+		"floor":    int64(1) << 40,
+	}))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("expected 422, got %d — %s", rec.Code, rec.Body.String())
 	}
-	t.Log("integration scaffold ready")
+}
+
+// crudRoundTrip drives create → get → list → update → delete through the HTTP
+// handler backed by the PostgreSQL repository.
+func crudRoundTrip(t *testing.T, router http.Handler, tok, base string, create, update map[string]any, check func(created, updated map[string]any)) {
+	t.Helper()
+	do := func(method, path string, body any) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, authReq(method, path, tok, body))
+		return rec
+	}
+
+	rec := do(http.MethodPost, base, create)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d — %s", rec.Code, rec.Body.String())
+	}
+	var created map[string]any
+	_ = json.NewDecoder(rec.Body).Decode(&created)
+	id, _ := created["id"].(string)
+	if id == "" {
+		t.Fatal("create: expected id")
+	}
+
+	if rec = do(http.MethodGet, base+"/"+id, nil); rec.Code != http.StatusOK {
+		t.Fatalf("get: expected 200, got %d", rec.Code)
+	}
+	if rec = do(http.MethodGet, base, nil); rec.Code != http.StatusOK {
+		t.Fatalf("list: expected 200, got %d", rec.Code)
+	}
+	var list []map[string]any
+	_ = json.NewDecoder(rec.Body).Decode(&list)
+	if len(list) != 1 {
+		t.Fatalf("list: expected 1 item, got %d", len(list))
+	}
+
+	rec = do(http.MethodPut, base+"/"+id, update)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update: expected 200, got %d — %s", rec.Code, rec.Body.String())
+	}
+	if rec = do(http.MethodGet, base+"/"+id, nil); rec.Code != http.StatusOK {
+		t.Fatalf("get after update: expected 200, got %d", rec.Code)
+	}
+	var updated map[string]any
+	_ = json.NewDecoder(rec.Body).Decode(&updated)
+	check(created, updated)
+
+	if rec = do(http.MethodDelete, base+"/"+id, nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete: expected 204, got %d", rec.Code)
+	}
+	if rec = do(http.MethodGet, base+"/"+id, nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("get after delete: expected 404, got %d", rec.Code)
+	}
 }

@@ -3,11 +3,11 @@ package user
 // User represents a CondoGuard user as returned by the API.
 // The Password field is never serialised to JSON.
 type User struct {
-	ID       string   `json:"id"       bson:"_id,omitempty"`
-	Username string   `json:"username" bson:"username"`
-	Email    string   `json:"email"    bson:"email"`
-	Password string   `json:"-"        bson:"password"`
-	Roles    []string `json:"roles"    bson:"roles"`
+	ID       string   `json:"id"`
+	Username string   `json:"username"`
+	Email    string   `json:"email"`
+	Password string   `json:"-"`
+	Roles    []string `json:"roles"`
 }
 
 // CreateRequest is the payload for POST /users.

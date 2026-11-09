@@ -1,5 +1,7 @@
 # CondoGuard API — Plano de Migração Java → Go
 
+> Documento histórico. Desde a Fase 1a-db o banco é PostgreSQL 17 + Redis 7 (o MongoDB saiu); veja o README.
+
 ## Contexto
 
 O backend atual é uma API REST em Spring Boot 3 / Java 17 com MongoDB e autenticação JWT. O objetivo é reescrever esse backend em Go, mantendo total paridade funcional, usando práticas modernas da linguagem e orientando toda a construção por testes.
