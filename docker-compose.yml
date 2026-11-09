@@ -39,7 +39,7 @@ services:
     restart: unless-stopped
 
   postgres:
-    image: postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
+    image: postgres:18-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
     container_name: condoguard-postgres
     ports:
       - "127.0.0.1:5432:5432"
@@ -47,8 +47,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-condoguard}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
       POSTGRES_DB: ${POSTGRES_DB:-condoguard}
+    # A imagem 18 guarda os dados em /var/lib/postgresql/18/docker e recusa
+    # subir com o volume em .../data. Volume novo: o de 17 não é reaproveitado
+    # (dados da POC; recrie com `make migrate-up`).
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres18_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -57,7 +60,7 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7-alpine@sha256:c5d34a98396a4775e223c74e929162c35c5a2182901ba26b50ade939941ce14b
+    image: redis:8-alpine@sha256:71885d8cc6e42f2bc0aa2eb853bfc4be200b5108a46ac50e117ae1df0531fb80
     container_name: condoguard-redis
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}"]
     ports:
@@ -76,7 +79,7 @@ services:
   # Bancos descartáveis para testes (dados em memória, só em 127.0.0.1).
   # Uso: make test-db-up && make test-integration
   postgres-test:
-    image: postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
+    image: postgres:18-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
     container_name: condoguard-postgres-test
     profiles: ["test"]
     ports:
@@ -85,7 +88,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_HOST_AUTH_METHOD: trust
     tmpfs:
-      - /var/lib/postgresql/data
+      - /var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 2s
@@ -95,7 +98,7 @@ services:
   # No password on purpose: test-only, ephemeral and bound to 127.0.0.1.
   # Never reuse this service (or its settings) outside local tests.
   redis-test:
-    image: redis:7-alpine@sha256:c5d34a98396a4775e223c74e929162c35c5a2182901ba26b50ade939941ce14b
+    image: redis:8-alpine@sha256:71885d8cc6e42f2bc0aa2eb853bfc4be200b5108a46ac50e117ae1df0531fb80
     container_name: condoguard-redis-test
     profiles: ["test"]
     ports:
@@ -107,5 +110,5 @@ services:
       retries: 20
 
 volumes:
-  postgres_data:
+  postgres18_data:
   redis_data:
