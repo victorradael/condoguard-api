@@ -63,3 +63,29 @@ requisições que reaproveitam a mesma conexão.
 Só inserção: sem política de UPDATE/DELETE e um gatilho que barra até o dono da tabela (inclusive `TRUNCATE`).
 Cada mudança em cadastro grava a entrada **na mesma transação** da mudança (`audit.Trail.Atomic`): não há mudança sem
 trilha nem trilha sem mudança. Leitura: `GET /audit-log?resource=&resourceId=&page=&pageSize=` (permissão `audit.read`).
+
+## Segurança da conta (migração 00004)
+
+| Rota | Quem | O quê |
+|---|---|---|
+| `POST /auth/email/verify`, `/auth/email/resend` | público (limite por IP) | confirma o e-mail com o token; reenvia o link. Mesma resposta (202) para qualquer e-mail |
+| `POST /auth/password/forgot`, `/auth/password/reset` | público (limite por IP) | link de uso único (1 h); a troca revoga todas as sessões da conta e confirma o e-mail |
+| `POST /auth/2fa/setup`, `/auth/2fa/enable` | logado, ou `mfaToken` de cadastro (corpo) | gera a semente, confirma com o primeiro código e mostra **uma vez** 10 códigos de recuperação |
+| `POST /auth/2fa/verify` | `mfaToken` de verificação | conclui o login com o código TOTP ou um código de recuperação |
+| `POST /auth/2fa/disable`, `/auth/2fa/recovery-codes` | logado + senha/código | desliga (não vale para quem tem papel que exige) / gera novos códigos |
+| `DELETE /auth/sessions` | logado | encerra todas as sessões (refresh e access tokens) |
+| `POST /users/{id}/account-links` `{purpose}` | `users.manage` | síndico gera link/código (`email_verify` ou `password_reset`, 24 h) para repassar por WhatsApp. Devolvido uma vez; a auditoria registra só a emissão |
+| `DELETE /users/{id}/2fa` | `users.manage` | zera o 2FA de quem perdeu celular e códigos e encerra as sessões |
+
+- **2FA obrigatório** para `administradora`, `sindico` e `conselho`: a senha sozinha devolve `{mfaRequired, stage: "enroll", mfaToken}` e
+  nenhuma sessão até a conta cadastrar o app. Com 2FA ligado, em qualquer papel, o login devolve `stage: "verify"`.
+- Um código TOTP vale uma vez (o passo precisa ser maior que o último aceito) e há limite de tentativas por conta.
+- A semente é cifrada com AES-256-GCM (`TOTP_ENCRYPTION_KEY`, amarrada ao id do usuário); os códigos de recuperação e os
+  tokens de link ficam só como hash SHA-256.
+- Quem ajuda não sobe de nível: `account-links` e `2fa` seguem a regra do `mayGrant` (o síndico não mexe na conta de uma
+  administradora).
+- Revogação de access token: lista no Redis por `jti` (logout) e por usuário (sair de todos, troca de senha, papéis). Se a lista
+  não puder ser lida, a requisição é recusada com 503, nunca aceita.
+- `REQUIRE_VERIFIED_EMAIL` (padrão: ligado em produção) recusa o login até confirmar o e-mail (`403 email_not_verified`).
+- Variáveis: `TOTP_ENCRYPTION_KEY` (Base64 de 32 bytes), `WEB_BASE_URL`, `SMTP_HOST`/`SMTP_PORT`/`SMTP_USERNAME`/`SMTP_PASSWORD`/`MAIL_FROM`,
+  `TOTP_ISSUER`; as três primeiras são obrigatórias com `APP_ENV=production`.
