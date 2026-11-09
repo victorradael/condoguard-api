@@ -14,9 +14,10 @@ import (
 )
 
 func TestPostgresRepository_Resident(t *testing.T) {
-	repo := resident.NewPostgresRepository(dbtest.NewPool(t))
-	ctxA := tenant.WithCondominiumID(context.Background(), "condo-a")
-	ctxB := tenant.WithCondominiumID(context.Background(), "condo-b")
+	env := dbtest.NewEnv(t)
+	repo := resident.NewPostgresRepository(env.Pool)
+	ctxA := tenant.WithCondominiumID(context.Background(), env.Condo("condo-a"))
+	ctxB := tenant.WithCondominiumID(context.Background(), env.Condo("condo-b"))
 
 	r := &resident.Resident{UnitNumber: "101", Floor: 1, CondominiumID: "bloco-1", OwnerID: "owner-1"}
 	if err := repo.Save(ctxA, r); err != nil {
@@ -127,9 +128,10 @@ func TestPostgresRepository_Resident(t *testing.T) {
 }
 
 func TestPostgresRepository_Resident_FindAllOwnerFilterAndPaging(t *testing.T) {
-	repo := resident.NewPostgresRepository(dbtest.NewPool(t))
-	ctxA := tenant.WithCondominiumID(context.Background(), "condo-a")
-	ctxB := tenant.WithCondominiumID(context.Background(), "condo-b")
+	env := dbtest.NewEnv(t)
+	repo := resident.NewPostgresRepository(env.Pool)
+	ctxA := tenant.WithCondominiumID(context.Background(), env.Condo("condo-a"))
+	ctxB := tenant.WithCondominiumID(context.Background(), env.Condo("condo-b"))
 
 	save := func(ctx context.Context, unit, owner string) string {
 		t.Helper()

@@ -43,7 +43,7 @@ func TestJWT_NewService_AcceptsStrongSecret(t *testing.T) {
 func TestJWT_GenerateToken_ReturnsNonEmptyString(t *testing.T) {
 	svc := jwt.MustNewService(testSecret)
 
-	token, err := svc.GenerateToken("user-123", "condo-a", []string{"ROLE_USER"})
+	token, err := svc.GenerateToken("user-123", "condo-a", []string{"morador"})
 
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -56,8 +56,8 @@ func TestJWT_GenerateToken_ReturnsNonEmptyString(t *testing.T) {
 func TestJWT_GenerateToken_DifferentUsersProduceDifferentTokens(t *testing.T) {
 	svc := jwt.MustNewService(testSecret)
 
-	token1, _ := svc.GenerateToken("user-1", "condo-a", []string{"ROLE_USER"})
-	token2, _ := svc.GenerateToken("user-2", "condo-a", []string{"ROLE_USER"})
+	token1, _ := svc.GenerateToken("user-1", "condo-a", []string{"morador"})
+	token2, _ := svc.GenerateToken("user-2", "condo-a", []string{"morador"})
 
 	if token1 == token2 {
 		t.Error("expected different tokens for different users")
@@ -67,10 +67,10 @@ func TestJWT_GenerateToken_DifferentUsersProduceDifferentTokens(t *testing.T) {
 func TestJWT_GenerateToken_EmptyUserOrCondominiumReturnsError(t *testing.T) {
 	svc := jwt.MustNewService(testSecret)
 
-	if _, err := svc.GenerateToken("", "condo-a", []string{"ROLE_USER"}); err == nil {
+	if _, err := svc.GenerateToken("", "condo-a", []string{"morador"}); err == nil {
 		t.Error("expected error for empty user ID")
 	}
-	if _, err := svc.GenerateToken("user-1", "", []string{"ROLE_USER"}); err == nil {
+	if _, err := svc.GenerateToken("user-1", "", []string{"morador"}); err == nil {
 		t.Error("expected error for empty condominium ID")
 	}
 }
@@ -80,7 +80,7 @@ func TestJWT_GenerateToken_EmptyUserOrCondominiumReturnsError(t *testing.T) {
 func TestJWT_ValidateToken_ValidTokenReturnsCorrectClaims(t *testing.T) {
 	svc := jwt.MustNewService(testSecret)
 
-	token, err := svc.GenerateToken("user-123", "condo-a", []string{"ROLE_ADMIN"})
+	token, err := svc.GenerateToken("user-123", "condo-a", []string{"sindico"})
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
@@ -93,8 +93,8 @@ func TestJWT_ValidateToken_ValidTokenReturnsCorrectClaims(t *testing.T) {
 	if claims.UserID != "user-123" || claims.CondominiumID != "condo-a" {
 		t.Errorf("unexpected claims: %+v", claims)
 	}
-	if len(claims.Roles) != 1 || claims.Roles[0] != "ROLE_ADMIN" {
-		t.Errorf("expected roles [ROLE_ADMIN], got %v", claims.Roles)
+	if len(claims.Roles) != 1 || claims.Roles[0] != "sindico" {
+		t.Errorf("expected roles [sindico], got %v", claims.Roles)
 	}
 	if claims.ID == "" || claims.Issuer != jwt.Issuer {
 		t.Errorf("expected jti and issuer, got %+v", claims.RegisteredClaims)
@@ -105,7 +105,7 @@ func TestJWT_ValidateToken_InvalidSignatureReturnsError(t *testing.T) {
 	svc := jwt.MustNewService(testSecret)
 	otherSvc := jwt.MustNewService("b3RoZXItc2VjcmV0LWtleS1mb3ItdGVzdGluZy0zMmJ5dGVz")
 
-	token, _ := svc.GenerateToken("user-123", "condo-a", []string{"ROLE_USER"})
+	token, _ := svc.GenerateToken("user-123", "condo-a", []string{"morador"})
 
 	if _, err := otherSvc.ValidateToken(token); err == nil {
 		t.Fatal("expected error for token signed with different secret")
@@ -179,7 +179,7 @@ func TestJWT_ValidateToken_ExpiredTokenReturnsError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	token, err := svc.GenerateToken("user-123", "condo-a", []string{"ROLE_USER"})
+	token, err := svc.GenerateToken("user-123", "condo-a", []string{"morador"})
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestJWT_ValidateToken_ExpiredTokenReturnsError(t *testing.T) {
 func TestJWT_ExtractUserID_ValidToken(t *testing.T) {
 	svc := jwt.MustNewService(testSecret)
 
-	token, _ := svc.GenerateToken("user-abc", "condo-a", []string{"ROLE_USER"})
+	token, _ := svc.GenerateToken("user-abc", "condo-a", []string{"morador"})
 	userID, err := svc.ExtractUserID(token)
 
 	if err != nil {

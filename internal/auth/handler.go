@@ -58,6 +58,8 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 		case errors.Is(err, ErrDuplicateEmail):
 			writeError(w, http.StatusConflict, "email already registered")
+		case errors.Is(err, ErrRegistrationClosed):
+			writeError(w, http.StatusForbidden, "sign-up is not open")
 		default:
 			internalError(w, r, err)
 		}
@@ -82,7 +84,13 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 
 	tokens, err := h.svc.Login(r.Context(), req)
 	if err != nil {
+		var need *CondominiumRequiredError
 		switch {
+		case errors.As(err, &need):
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":        "condominiumId is required: the account belongs to more than one condominium",
+				"condominiums": need.Condominiums,
+			})
 		case errors.Is(err, ErrValidation):
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 		case errors.Is(err, ErrInvalidCredentials):

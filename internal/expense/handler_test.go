@@ -38,7 +38,7 @@ func tokenFor(t *testing.T, userID, condoID string, roles ...string) string {
 // validToken is an admin of condo-a (expense management is admin-only).
 func validToken(t *testing.T) string {
 	t.Helper()
-	return tokenFor(t, "admin-1", "condo-a", authz.RoleAdmin)
+	return tokenFor(t, "admin-1", dbtest.CondoA, authz.RoleSindico)
 }
 
 type listBody struct {
@@ -325,7 +325,7 @@ func TestExpenses_Delete_NonExistent_Returns404(t *testing.T) {
 // ── Integration (PostgreSQL; requires TEST_DATABASE_URL) ───────────────────────
 
 func TestIntegration_Expenses_CRUD(t *testing.T) {
-	pool := dbtest.NewPool(t)
+	pool := dbtest.NewPool(t, dbtest.CondoA, dbtest.CondoB)
 	router := expense.NewHandler(expense.NewService(expense.NewPostgresRepository(pool), testUnits), middleware.Authenticate(handlerJWT))
 
 	crudRoundTrip(t, router, validToken(t), "/expenses",
@@ -402,7 +402,7 @@ func serve(router http.Handler, method, path, tok string, body any) *httptest.Re
 func TestHandler_Security_InvalidToken_Returns401(t *testing.T) {
 	router := newTestRouter(t)
 	other := pkgjwt.MustNewService("b3RoZXItc2VjcmV0LWtleS1mb3ItdW5pdC10ZXN0aW5nLTMyYg==")
-	forged, _ := other.GenerateToken("admin-1", "condo-a", []string{authz.RoleAdmin})
+	forged, _ := other.GenerateToken("admin-1", dbtest.CondoA, []string{authz.RoleSindico})
 	if rec := serve(router, http.MethodGet, "/expenses", forged, nil); rec.Code != http.StatusUnauthorized {
 		t.Errorf("token signed with another key: expected 401, got %d", rec.Code)
 	}
@@ -415,7 +415,7 @@ func TestHandler_Security_UserCannotCreateUpdateDelete_Returns403(t *testing.T) 
 	router := newTestRouter(t)
 	e := createExpense(t, router, validToken(t), map[string]any{"residentId": "res-a"})
 	id := fmt.Sprintf("%v", e["id"])
-	user := tokenFor(t, "user-a", "condo-a", authz.RoleUser) // owner of res-a
+	user := tokenFor(t, "user-a", dbtest.CondoA, authz.RoleMorador) // owner of res-a
 
 	if rec := serve(router, http.MethodPost, "/expenses", user, map[string]any{
 		"description": "x", "amountCents": 1, "dueDate": "2026-03-31T00:00:00Z", "residentId": "res-a",
@@ -429,7 +429,7 @@ func TestHandler_Security_UserCannotCreateUpdateDelete_Returns403(t *testing.T) 
 		t.Errorf("delete: expected 403, got %d", rec.Code)
 	}
 	// A token without any role is not an admin either.
-	if rec := serve(router, http.MethodDelete, "/expenses/"+id, tokenFor(t, "user-x", "condo-a"), nil); rec.Code != http.StatusForbidden {
+	if rec := serve(router, http.MethodDelete, "/expenses/"+id, tokenFor(t, "user-x", dbtest.CondoA), nil); rec.Code != http.StatusForbidden {
 		t.Errorf("delete without roles: expected 403, got %d", rec.Code)
 	}
 
@@ -447,8 +447,8 @@ func TestHandler_Security_UserSeesOnlyOwnUnits(t *testing.T) {
 	resA := createExpense(t, router, admin, map[string]any{"description": "res-a", "dueDate": "2026-01-01T00:00:00Z", "residentId": "res-a"})
 	shopA := createExpense(t, router, admin, map[string]any{"description": "shop-a", "dueDate": "2026-02-01T00:00:00Z", "residentId": "", "shopOwnerId": "shop-a"})
 	resB := createExpense(t, router, admin, map[string]any{"description": "res-b", "dueDate": "2026-03-01T00:00:00Z", "residentId": "res-b"})
-	userA := tokenFor(t, "user-a", "condo-a", authz.RoleUser)
-	userB := tokenFor(t, "user-b", "condo-a", authz.RoleUser)
+	userA := tokenFor(t, "user-a", dbtest.CondoA, authz.RoleMorador)
+	userB := tokenFor(t, "user-b", dbtest.CondoA, authz.RoleMorador)
 
 	b := decodeList(t, serve(router, http.MethodGet, "/expenses", userA, nil))
 	if b.Total != 2 || len(b.Items) != 2 || b.Items[0]["id"] != resA["id"] || b.Items[1]["id"] != shopA["id"] {
@@ -458,7 +458,7 @@ func TestHandler_Security_UserSeesOnlyOwnUnits(t *testing.T) {
 	if b.Total != 1 || len(b.Items) != 1 || b.Items[0]["id"] != resB["id"] {
 		t.Fatalf("user-b list: expected [res-b], got %+v", b)
 	}
-	b = decodeList(t, serve(router, http.MethodGet, "/expenses", tokenFor(t, "nobody", "condo-a", authz.RoleUser), nil))
+	b = decodeList(t, serve(router, http.MethodGet, "/expenses", tokenFor(t, "nobody", dbtest.CondoA, authz.RoleMorador), nil))
 	if b.Total != 0 || len(b.Items) != 0 {
 		t.Fatalf("user without units: expected empty list, got %+v", b)
 	}
@@ -481,7 +481,7 @@ func TestHandler_Security_OtherCondominiumToken_Returns404(t *testing.T) {
 	router := newTestRouter(t)
 	e := createExpense(t, router, validToken(t), map[string]any{"residentId": "res-a"})
 	path := fmt.Sprintf("/expenses/%v", e["id"])
-	otherAdmin := tokenFor(t, "admin-1", "condo-b", authz.RoleAdmin) // same user ID, other condominium
+	otherAdmin := tokenFor(t, "admin-1", dbtest.CondoB, authz.RoleSindico) // same user ID, other condominium
 
 	if rec := serve(router, http.MethodGet, path, otherAdmin, nil); rec.Code != http.StatusNotFound {
 		t.Errorf("get: expected 404, got %d", rec.Code)
@@ -496,7 +496,7 @@ func TestHandler_Security_OtherCondominiumToken_Returns404(t *testing.T) {
 		t.Errorf("list: expected nothing from condo-a, got %+v", b)
 	}
 	// user-a's units resolve to res-a, but the token is for condo-b.
-	if rec := serve(router, http.MethodGet, path, tokenFor(t, "user-a", "condo-b", authz.RoleUser), nil); rec.Code != http.StatusNotFound {
+	if rec := serve(router, http.MethodGet, path, tokenFor(t, "user-a", dbtest.CondoB, authz.RoleMorador), nil); rec.Code != http.StatusNotFound {
 		t.Errorf("user of other condominium: expected 404, got %d", rec.Code)
 	}
 
@@ -555,12 +555,12 @@ func TestHandler_List_InvalidToDate_Returns400(t *testing.T) {
 }
 
 func TestIntegration_Expenses_Security(t *testing.T) {
-	pool := dbtest.NewPool(t)
+	pool := dbtest.NewPool(t, dbtest.CondoA, dbtest.CondoB)
 	router := expense.NewHandler(expense.NewService(expense.NewPostgresRepository(pool), testUnits), middleware.Authenticate(handlerJWT))
 	admin := validToken(t)
 	resA := createExpense(t, router, admin, map[string]any{"residentId": "res-a"})
 	resB := createExpense(t, router, admin, map[string]any{"residentId": "res-b"})
-	userA := tokenFor(t, "user-a", "condo-a", authz.RoleUser)
+	userA := tokenFor(t, "user-a", dbtest.CondoA, authz.RoleMorador)
 
 	if b := decodeList(t, serve(router, http.MethodGet, "/expenses", userA, nil)); b.Total != 1 || len(b.Items) != 1 || b.Items[0]["id"] != resA["id"] {
 		t.Errorf("user-a list: expected only res-a, got %+v", b)
@@ -571,7 +571,7 @@ func TestIntegration_Expenses_Security(t *testing.T) {
 	if rec := serve(router, http.MethodDelete, fmt.Sprintf("/expenses/%v", resA["id"]), userA, nil); rec.Code != http.StatusForbidden {
 		t.Errorf("user-a DELETE: expected 403, got %d", rec.Code)
 	}
-	otherAdmin := tokenFor(t, "admin-1", "condo-b", authz.RoleAdmin)
+	otherAdmin := tokenFor(t, "admin-1", dbtest.CondoB, authz.RoleSindico)
 	if rec := serve(router, http.MethodPut, fmt.Sprintf("/expenses/%v", resA["id"]), otherAdmin, map[string]any{"amountCents": 1}); rec.Code != http.StatusNotFound {
 		t.Errorf("condo-b admin PUT: expected 404, got %d", rec.Code)
 	}

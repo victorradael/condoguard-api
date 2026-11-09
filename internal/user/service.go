@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
+	"github.com/victorradael/condoguard/api/internal/audit"
 	"github.com/victorradael/condoguard/api/internal/authz"
 	pkgemail "github.com/victorradael/condoguard/api/pkg/email"
 	"github.com/victorradael/condoguard/api/pkg/page"
@@ -13,18 +15,35 @@ import (
 
 // Service holds the business logic for the user domain.
 type Service struct {
-	repo Repository
+	repo  Repository
+	trail audit.Trail
 }
+
+const auditResource = "user"
 
 // NewService creates a user Service.
 func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+	return &Service{repo: repo, trail: audit.NewTrail()}
+}
+
+// WithAudit makes every change write its audit entry in the same transaction.
+func (s *Service) WithAudit(t audit.Trail) *Service {
+	s.trail = t
+	return s
+}
+
+// mayGrant reports whether the caller may give (or take away) these roles:
+// only whoever manages the condominium itself can touch the administradora role,
+// so a síndico cannot promote anyone, or themselves, above their own level.
+func mayGrant(p authz.Principal, roles []string) bool {
+	return !slices.Contains(roles, authz.RoleAdministradora) || p.Can(authz.PermCondominiumManage)
 }
 
 // Create validates the request, hashes the password and persists the user.
-// Only admins may call it, so it may grant any known role.
+// Needs users.manage; the administradora role needs condominium.manage.
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*User, error) {
-	if _, err := authz.RequireAdmin(ctx); err != nil {
+	p, err := authz.Require(ctx, authz.PermUsersManage)
+	if err != nil {
 		return nil, err
 	}
 	if req.Username == "" {
@@ -40,10 +59,13 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*User, error) 
 
 	roles := req.Roles
 	if len(roles) == 0 {
-		roles = []string{authz.RoleUser}
+		roles = []string{authz.RoleMorador}
 	}
 	if err = validateRoles(roles); err != nil {
 		return nil, err
+	}
+	if !mayGrant(p, roles) {
+		return nil, authz.ErrForbidden
 	}
 
 	hashed, err := password.Hash(req.Password)
@@ -58,10 +80,24 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*User, error) 
 		Roles:    roles,
 	}
 
-	if err := s.repo.Save(ctx, u); err != nil {
+	err = s.trail.Atomic(ctx, func(ctx context.Context) (audit.Entry, error) {
+		if err := s.repo.Save(ctx, u); err != nil {
+			return audit.Entry{}, err
+		}
+		return audit.Entry{Action: audit.ActionCreate, Resource: auditResource, ResourceID: u.ID, After: u}, nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return u, nil
+}
+
+// Get returns a user of the condominium. Needs users.read.
+func (s *Service) Get(ctx context.Context, id string) (*User, error) {
+	if _, err := authz.Require(ctx, authz.PermUsersRead); err != nil {
+		return nil, err
+	}
+	return s.repo.FindByID(ctx, id)
 }
 
 // GetByID returns the user with the given ID or ErrNotFound. It is not gated
@@ -72,7 +108,7 @@ func (s *Service) GetByID(ctx context.Context, id string) (*User, error) {
 
 // List returns one page of the condominium's users.
 func (s *Service) List(ctx context.Context, p page.Params) (page.Result[*User], error) {
-	if _, err := authz.RequireAdmin(ctx); err != nil {
+	if _, err := authz.Require(ctx, authz.PermUsersRead); err != nil {
 		return page.Result[*User]{}, err
 	}
 	list, total, err := s.repo.FindAll(ctx, p)
@@ -87,18 +123,27 @@ func (s *Service) List(ctx context.Context, p page.Params) (page.Result[*User], 
 // Changing the roles revokes the user's refresh tokens, so the old roles do
 // not survive a refresh (the current access token still expires on its own).
 func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*User, error) {
-	if _, err := authz.RequireAdmin(ctx); err != nil {
+	p, err := authz.Require(ctx, authz.PermUsersManage)
+	if err != nil {
 		return nil, err
 	}
 	if len(req.Roles) > 0 {
 		if err := validateRoles(req.Roles); err != nil {
 			return nil, err
 		}
+		if !mayGrant(p, req.Roles) {
+			return nil, authz.ErrForbidden
+		}
 	}
 	u, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	if !mayGrant(p, u.Roles) {
+		return nil, authz.ErrForbidden
+	}
+	before := *u
+	before.Roles = slices.Clone(u.Roles)
 
 	if req.Username != "" {
 		u.Username = req.Username
@@ -109,23 +154,46 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*Us
 	}
 	// req.Email is silently ignored — business rule: email is immutable.
 
-	if err := s.repo.Update(ctx, u); err != nil {
-		return nil, err
-	}
-	if rolesChanged {
-		if err := s.repo.RevokeSessions(ctx, u.ID); err != nil {
-			return nil, err
+	err = s.trail.Atomic(ctx, func(ctx context.Context) (audit.Entry, error) {
+		if err := s.repo.Update(ctx, u); err != nil {
+			return audit.Entry{}, err
 		}
+		if rolesChanged {
+			if err := s.repo.RevokeSessions(ctx, u.ID); err != nil {
+				return audit.Entry{}, err
+			}
+		}
+		return audit.Entry{Action: audit.ActionUpdate, Resource: auditResource, ResourceID: u.ID, Before: before, After: u}, nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return u, nil
 }
 
-// Delete removes the user with the given ID or returns ErrNotFound.
+// Delete takes the user out of the condominium (and deletes the account when
+// it was the last one) or returns ErrNotFound. Needs users.manage.
 func (s *Service) Delete(ctx context.Context, id string) error {
-	if _, err := authz.RequireAdmin(ctx); err != nil {
+	p, err := authz.Require(ctx, authz.PermUsersManage)
+	if err != nil {
 		return err
 	}
-	return s.repo.Delete(ctx, id)
+	return s.trail.Atomic(ctx, func(ctx context.Context) (audit.Entry, error) {
+		before, err := s.repo.FindByID(ctx, id)
+		if err != nil {
+			return audit.Entry{}, err
+		}
+		if !mayGrant(p, before.Roles) {
+			return audit.Entry{}, authz.ErrForbidden
+		}
+		if err = s.repo.RevokeSessions(ctx, id); err != nil {
+			return audit.Entry{}, err
+		}
+		if err = s.repo.Delete(ctx, id); err != nil {
+			return audit.Entry{}, err
+		}
+		return audit.Entry{Action: audit.ActionDelete, Resource: auditResource, ResourceID: id, Before: before}, nil
+	})
 }
 
 func sameRoles(a, b []string) bool {
@@ -138,7 +206,7 @@ func sameRoles(a, b []string) bool {
 func validateRoles(roles []string) error {
 	for _, r := range roles {
 		if !authz.ValidRole(r) {
-			return fmt.Errorf("%w: unknown role %q (use %s or %s)", ErrValidation, r, authz.RoleUser, authz.RoleAdmin)
+			return fmt.Errorf("%w: unknown role %q (use one of %s)", ErrValidation, r, strings.Join(authz.Roles, ", "))
 		}
 	}
 	return nil

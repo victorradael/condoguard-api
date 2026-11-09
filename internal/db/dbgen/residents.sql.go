@@ -19,7 +19,7 @@ WHERE condominium_id = $1
 `
 
 type CountResidentsParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	OwnerID       *string
 }
 
@@ -36,7 +36,7 @@ WHERE condominium_id = $1 AND id = $2
 `
 
 type DeleteResidentParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	ID            uuid.UUID
 }
 
@@ -49,13 +49,13 @@ func (q *Queries) DeleteResident(ctx context.Context, arg DeleteResidentParams) 
 }
 
 const getResidentByID = `-- name: GetResidentByID :one
-SELECT id, condominium_id, condominium_ref, unit_number, floor, owner_id, created_at
+SELECT id, condominium_ref, unit_number, floor, owner_id, created_at, condominium_id
 FROM residents
 WHERE condominium_id = $1 AND id = $2
 `
 
 type GetResidentByIDParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	ID            uuid.UUID
 }
 
@@ -64,12 +64,12 @@ func (q *Queries) GetResidentByID(ctx context.Context, arg GetResidentByIDParams
 	var i Resident
 	err := row.Scan(
 		&i.ID,
-		&i.CondominiumID,
 		&i.CondominiumRef,
 		&i.UnitNumber,
 		&i.Floor,
 		&i.OwnerID,
 		&i.CreatedAt,
+		&i.CondominiumID,
 	)
 	return i, err
 }
@@ -81,7 +81,7 @@ RETURNING id
 `
 
 type InsertResidentParams struct {
-	CondominiumID  string
+	CondominiumID  uuid.UUID
 	CondominiumRef string
 	UnitNumber     string
 	Floor          int32
@@ -108,7 +108,7 @@ WHERE condominium_id = $1 AND owner_id = $2
 `
 
 type ListResidentIDsByOwnerParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	OwnerID       string
 }
 
@@ -133,7 +133,7 @@ func (q *Queries) ListResidentIDsByOwner(ctx context.Context, arg ListResidentID
 }
 
 const listResidents = `-- name: ListResidents :many
-SELECT id, condominium_id, condominium_ref, unit_number, floor, owner_id, created_at
+SELECT id, condominium_ref, unit_number, floor, owner_id, created_at, condominium_id
 FROM residents
 WHERE condominium_id = $1
   AND ($2::text IS NULL OR owner_id = $2::text)
@@ -142,7 +142,7 @@ LIMIT $4 OFFSET $3
 `
 
 type ListResidentsParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	OwnerID       *string
 	PageOffset    int32
 	PageLimit     int32
@@ -165,12 +165,12 @@ func (q *Queries) ListResidents(ctx context.Context, arg ListResidentsParams) ([
 		var i Resident
 		if err := rows.Scan(
 			&i.ID,
-			&i.CondominiumID,
 			&i.CondominiumRef,
 			&i.UnitNumber,
 			&i.Floor,
 			&i.OwnerID,
 			&i.CreatedAt,
+			&i.CondominiumID,
 		); err != nil {
 			return nil, err
 		}
@@ -194,7 +194,7 @@ SELECT EXISTS (
 `
 
 type ResidentUnitExistsParams struct {
-	CondominiumID  string
+	CondominiumID  uuid.UUID
 	CondominiumRef string
 	UnitNumber     string
 	ExcludeID      *uuid.UUID
@@ -223,7 +223,7 @@ type UpdateResidentParams struct {
 	UnitNumber     string
 	Floor          int32
 	OwnerID        string
-	CondominiumID  string
+	CondominiumID  uuid.UUID
 	ID             uuid.UUID
 }
 

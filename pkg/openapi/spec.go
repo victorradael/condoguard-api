@@ -12,7 +12,7 @@ func NewSpec() *Spec {
 				"**Autenticação.** O app envia o access token em `Authorization: Bearer`; o web usa os cookies " +
 				"httpOnly `cg_access`/`cg_refresh` (login com `useCookies: true`). Com cookie, requisições que " +
 				"alteram dados precisam vir de uma origem permitida (cabeçalho `Origin`).\n\n" +
-				"**Papéis.** `ROLE_ADMIN` administra o condomínio e vê tudo nele. `ROLE_USER` (morador/lojista) " +
+				"**Papéis.** `sindico` administra o condomínio e vê tudo nele. `morador` (morador/lojista) " +
 				"só lê os registros das próprias unidades e lojas; o que ele não pode ver responde 404. " +
 				"Nada de outro condomínio é visível.\n\n" +
 				"**Listas** são paginadas: `?page=1&pageSize=20` (máx. 100) → `{items, page, pageSize, total}`.",
@@ -29,7 +29,7 @@ func NewSpec() *Spec {
 		},
 		Tags: []Tag{
 			{Name: "Auth", Description: "Cadastro, login e sessão"},
-			{Name: "Users", Description: "Gestão de usuários (ROLE_ADMIN), exceto /users/me"},
+			{Name: "Users", Description: "Gestão de usuários (sindico), exceto /users/me"},
 			{Name: "Residents", Description: "Unidades residenciais"},
 			{Name: "ShopOwners", Description: "Lojas"},
 			{Name: "Expenses", Description: "Despesas"},
@@ -74,7 +74,7 @@ func buildSchemas() map[string]*Schema {
 	strArr := func(desc string) *Schema {
 		return &Schema{Type: "array", Items: &Schema{Type: "string"}, Description: desc}
 	}
-	roles := &Schema{Type: "array", Items: &Schema{Type: "string", Enum: []any{"ROLE_USER", "ROLE_ADMIN"}}, Description: "Papéis"}
+	roles := &Schema{Type: "array", Items: &Schema{Type: "string", Enum: []any{"morador", "sindico"}}, Description: "Papéis"}
 	password := &Schema{Type: "string", MinLength: ptr(10), Description: "Senha: 10+ caracteres, até 72 bytes, com letras e números; não pode conter o e-mail ou o username"}
 
 	return map[string]*Schema{
@@ -97,7 +97,7 @@ func buildSchemas() map[string]*Schema {
 		// ── Auth ─────────────────────────────────────────────────────────────
 		"RegisterRequest": {
 			Type:        "object",
-			Description: "O cadastro público sempre cria um morador (ROLE_USER). Papéis enviados aqui são ignorados.",
+			Description: "O cadastro público sempre cria um morador (morador). Papéis enviados aqui são ignorados.",
 			Properties: map[string]*Schema{
 				"username": str("Nome de exibição"),
 				"email":    strFmt("E-mail (login); único, sem diferenciar maiúsculas", "email"),
@@ -325,7 +325,7 @@ type crud struct {
 // crudPaths builds the collection and item paths of a resource.
 func crudPaths(c crud) (collection, item PathItem) {
 	idParam := pathParam("id", "ID do recurso")
-	forbidden := errResp("ROLE_ADMIN necessário")
+	forbidden := errResp("sindico necessário")
 	notFound := errResp(c.noun + " não encontrada(o), ou de outro usuário/condomínio")
 	unauth := errResp("Não autenticado")
 
@@ -363,7 +363,7 @@ func crudPaths(c crud) (collection, item PathItem) {
 		},
 		"post": {
 			Tags:        []string{c.tag},
-			Summary:     "Criar (ROLE_ADMIN)",
+			Summary:     "Criar (sindico)",
 			Description: c.createDesc,
 			OperationID: "create" + c.opID,
 			Security:    bearerSecurity,
@@ -386,7 +386,7 @@ func crudPaths(c crud) (collection, item PathItem) {
 		},
 		"put": {
 			Tags:        []string{c.tag},
-			Summary:     "Atualizar (ROLE_ADMIN)",
+			Summary:     "Atualizar (sindico)",
 			OperationID: "update" + c.opID,
 			Security:    bearerSecurity,
 			Parameters:  []Parameter{idParam},
@@ -395,7 +395,7 @@ func crudPaths(c crud) (collection, item PathItem) {
 		},
 		"delete": {
 			Tags:        []string{c.tag},
-			Summary:     "Remover (ROLE_ADMIN)",
+			Summary:     "Remover (sindico)",
 			OperationID: "delete" + c.opID,
 			Security:    bearerSecurity,
 			Parameters:  []Parameter{idParam},
@@ -443,10 +443,10 @@ func buildPaths() map[string]PathItem {
 		tag: "Users", schema: "User", noun: "Usuário", opID: "User",
 		conflict: "E-mail já cadastrado",
 	})
-	users["get"].Summary, users["get"].Description = "Listar usuários (ROLE_ADMIN)", ""
-	users["get"].Responses["403"] = errResp("ROLE_ADMIN necessário")
-	userItem["get"].Summary = "Obter usuário por ID (ROLE_ADMIN)"
-	userItem["get"].Responses["403"] = errResp("ROLE_ADMIN necessário")
+	users["get"].Summary, users["get"].Description = "Listar usuários (sindico)", ""
+	users["get"].Responses["403"] = errResp("sindico necessário")
+	userItem["get"].Summary = "Obter usuário por ID (sindico)"
+	userItem["get"].Responses["403"] = errResp("sindico necessário")
 
 	return map[string]PathItem{
 		// ── System ───────────────────────────────────────────────────────────
@@ -467,7 +467,7 @@ func buildPaths() map[string]PathItem {
 			"post": {
 				Tags:        []string{"Auth"},
 				Summary:     "Cadastrar morador",
-				Description: "Cria sempre um ROLE_USER. Administradores são criados por um admin em POST /users.",
+				Description: "Cria sempre um morador. Administradores são criados por um admin em POST /users.",
 				OperationID: "authRegister",
 				Security:    public,
 				RequestBody: jsonBody("RegisterRequest", true),

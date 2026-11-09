@@ -13,11 +13,12 @@ import (
 )
 
 func TestPostgresRepository_User(t *testing.T) {
-	repo := user.NewPostgresRepository(dbtest.NewPool(t))
-	ctxA := tenant.WithCondominiumID(context.Background(), "condo-a")
-	ctxB := tenant.WithCondominiumID(context.Background(), "condo-b")
+	env := dbtest.NewEnv(t)
+	repo := user.NewPostgresRepository(env.Pool)
+	ctxA := tenant.WithCondominiumID(context.Background(), env.Condo("condo-a"))
+	ctxB := tenant.WithCondominiumID(context.Background(), env.Condo("condo-b"))
 
-	u := &user.User{Username: "ana", Email: "ana@exemplo.test", Password: "hash", Roles: []string{"ROLE_ADMIN"}}
+	u := &user.User{Username: "ana", Email: "ana@exemplo.test", Password: "hash", Roles: []string{"sindico"}}
 	if err := repo.Save(ctxA, u); err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -26,21 +27,21 @@ func TestPostgresRepository_User(t *testing.T) {
 	}
 
 	t.Run("duplicate email in same condominium", func(t *testing.T) {
-		err := repo.Save(ctxA, &user.User{Username: "other", Email: "ana@exemplo.test", Password: "h"})
+		err := repo.Save(ctxA, &user.User{Username: "other", Email: "ana@exemplo.test", Password: "h", Roles: []string{"morador"}})
 		if !errors.Is(err, user.ErrDuplicate) {
 			t.Fatalf("expected ErrDuplicate, got %v", err)
 		}
 	})
 
 	t.Run("duplicate email in another condominium", func(t *testing.T) {
-		err := repo.Save(ctxB, &user.User{Username: "ana", Email: "ana@exemplo.test", Password: "h"})
+		err := repo.Save(ctxB, &user.User{Username: "ana", Email: "ana@exemplo.test", Password: "h", Roles: []string{"morador"}})
 		if !errors.Is(err, user.ErrDuplicate) {
 			t.Fatalf("e-mail must be unique across condominiums: expected ErrDuplicate, got %v", err)
 		}
 	})
 
 	t.Run("non-normalised email is rejected by the database", func(t *testing.T) {
-		if err := repo.Save(ctxA, &user.User{Username: "x", Email: "Mixed@Exemplo.test", Password: "h"}); err == nil {
+		if err := repo.Save(ctxA, &user.User{Username: "x", Email: "Mixed@Exemplo.test", Password: "h", Roles: []string{"morador"}}); err == nil {
 			t.Error("expected the users_email_normalized_check to reject a non-normalised e-mail")
 		}
 	})
@@ -50,11 +51,11 @@ func TestPostgresRepository_User(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Username != "ana" || got.Email != "ana@exemplo.test" || got.Password != "hash" || len(got.Roles) != 1 || got.Roles[0] != "ROLE_ADMIN" {
+		if got.Username != "ana" || got.Email != "ana@exemplo.test" || got.Password != "hash" || len(got.Roles) != 1 || got.Roles[0] != "sindico" {
 			t.Errorf("unexpected user: %+v", got)
 		}
 		got.Username = "ana-maria"
-		got.Roles = []string{"ROLE_USER", "ROLE_ADMIN"}
+		got.Roles = []string{"morador", "sindico"}
 		if err := repo.Update(ctxA, got); err != nil {
 			t.Fatal(err)
 		}
@@ -113,17 +114,18 @@ func TestPostgresRepository_User(t *testing.T) {
 }
 
 func TestPostgresRepository_User_PagingAndTenantTotals(t *testing.T) {
-	repo := user.NewPostgresRepository(dbtest.NewPool(t))
-	ctxA := tenant.WithCondominiumID(context.Background(), "condo-a")
-	ctxB := tenant.WithCondominiumID(context.Background(), "condo-b")
+	env := dbtest.NewEnv(t)
+	repo := user.NewPostgresRepository(env.Pool)
+	ctxA := tenant.WithCondominiumID(context.Background(), env.Condo("condo-a"))
+	ctxB := tenant.WithCondominiumID(context.Background(), env.Condo("condo-b"))
 
 	for i := 1; i <= 5; i++ {
-		if err := repo.Save(ctxA, &user.User{Username: fmt.Sprintf("a%d", i), Email: fmt.Sprintf("a%d@exemplo.test", i), Password: "h"}); err != nil {
+		if err := repo.Save(ctxA, &user.User{Username: fmt.Sprintf("a%d", i), Email: fmt.Sprintf("a%d@exemplo.test", i), Password: "h", Roles: []string{"morador"}}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for i := 1; i <= 2; i++ {
-		if err := repo.Save(ctxB, &user.User{Username: fmt.Sprintf("b%d", i), Email: fmt.Sprintf("b%d@exemplo.test", i), Password: "h"}); err != nil {
+		if err := repo.Save(ctxB, &user.User{Username: fmt.Sprintf("b%d", i), Email: fmt.Sprintf("b%d@exemplo.test", i), Password: "h", Roles: []string{"morador"}}); err != nil {
 			t.Fatal(err)
 		}
 	}

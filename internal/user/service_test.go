@@ -19,7 +19,7 @@ func ctxAs(condo, userID string, roles ...string) context.Context {
 }
 
 // adminCtx is an admin of condo-a.
-func adminCtx() context.Context { return ctxAs(condoA, "admin-1", authz.RoleAdmin) }
+func adminCtx() context.Context { return ctxAs(condoA, "admin-1", authz.RoleSindico) }
 
 func newService() *user.Service {
 	return user.NewService(user.NewInMemoryRepository())
@@ -43,7 +43,7 @@ func TestUser_Create_Success(t *testing.T) {
 		Username: "alice",
 		Email:    "alice@example.com",
 		Password: strongPass,
-		Roles:    []string{"ROLE_USER"},
+		Roles:    []string{"morador"},
 	})
 
 	if err != nil {
@@ -237,7 +237,7 @@ func TestUser_Update_ChangesUsernameAndRoles(t *testing.T) {
 
 	updated, err := svc.Update(ctx, created.ID, user.UpdateRequest{
 		Username: "alice-updated",
-		Roles:    []string{"ROLE_ADMIN"},
+		Roles:    []string{"sindico"},
 	})
 
 	if err != nil {
@@ -246,8 +246,8 @@ func TestUser_Update_ChangesUsernameAndRoles(t *testing.T) {
 	if updated.Username != "alice-updated" {
 		t.Errorf("expected username 'alice-updated', got %q", updated.Username)
 	}
-	if len(updated.Roles) != 1 || updated.Roles[0] != "ROLE_ADMIN" {
-		t.Errorf("expected roles [ROLE_ADMIN], got %v", updated.Roles)
+	if len(updated.Roles) != 1 || updated.Roles[0] != "sindico" {
+		t.Errorf("expected roles [sindico], got %v", updated.Roles)
 	}
 }
 
@@ -319,12 +319,12 @@ func TestUser_Delete_NonExistent_ReturnsNotFoundError(t *testing.T) {
 func TestUser_Service_NonAdminIsForbidden(t *testing.T) {
 	svc := newService()
 	created := mustCreate(t, svc, user.CreateRequest{Username: "alice", Email: "alice@example.com", Password: strongPass})
-	resident := ctxAs(condoA, created.ID, authz.RoleUser)
+	resident := ctxAs(condoA, created.ID, authz.RoleMorador)
 
-	if _, err := svc.Create(resident, user.CreateRequest{Username: "x", Email: "x@example.com", Password: strongPass, Roles: []string{authz.RoleAdmin}}); !errors.Is(err, authz.ErrForbidden) {
+	if _, err := svc.Create(resident, user.CreateRequest{Username: "x", Email: "x@example.com", Password: strongPass, Roles: []string{authz.RoleSindico}}); !errors.Is(err, authz.ErrForbidden) {
 		t.Errorf("Create: expected ErrForbidden, got %v", err)
 	}
-	if _, err := svc.Update(resident, created.ID, user.UpdateRequest{Roles: []string{authz.RoleAdmin}}); !errors.Is(err, authz.ErrForbidden) {
+	if _, err := svc.Update(resident, created.ID, user.UpdateRequest{Roles: []string{authz.RoleSindico}}); !errors.Is(err, authz.ErrForbidden) {
 		t.Errorf("Update: expected ErrForbidden, got %v", err)
 	}
 	if _, err := svc.List(resident, page.Default); !errors.Is(err, authz.ErrForbidden) {
@@ -341,12 +341,12 @@ func TestUser_Service_NonAdminIsForbidden(t *testing.T) {
 func TestUser_Service_InMemoryIsTenantScoped(t *testing.T) {
 	svc := newService()
 	created := mustCreate(t, svc, user.CreateRequest{Username: "alice", Email: "alice@example.com", Password: strongPass})
-	adminB := ctxAs(condoB, "admin-b", authz.RoleAdmin)
+	adminB := ctxAs(condoB, "admin-b", authz.RoleSindico)
 
 	if _, err := svc.GetByID(adminB, created.ID); !user.IsNotFoundError(err) {
 		t.Errorf("GetByID: expected not found, got %v", err)
 	}
-	if _, err := svc.Update(adminB, created.ID, user.UpdateRequest{Roles: []string{authz.RoleAdmin}}); !user.IsNotFoundError(err) {
+	if _, err := svc.Update(adminB, created.ID, user.UpdateRequest{Roles: []string{authz.RoleSindico}}); !user.IsNotFoundError(err) {
 		t.Errorf("Update: expected not found, got %v", err)
 	}
 	if err := svc.Delete(adminB, created.ID); !user.IsNotFoundError(err) {
@@ -377,13 +377,13 @@ func TestUser_Update_RoleChangeRevokesSessions(t *testing.T) {
 	svc := user.NewService(spy)
 	created := mustCreate(t, svc, user.CreateRequest{Username: "alice", Email: "alice@example.com", Password: strongPass})
 
-	if _, err := svc.Update(adminCtx(), created.ID, user.UpdateRequest{Username: "alice2", Roles: []string{authz.RoleUser}}); err != nil {
+	if _, err := svc.Update(adminCtx(), created.ID, user.UpdateRequest{Username: "alice2", Roles: []string{authz.RoleMorador}}); err != nil {
 		t.Fatal(err)
 	}
 	if len(spy.revoked) != 0 {
 		t.Fatalf("same roles must not revoke sessions, got %v", spy.revoked)
 	}
-	if _, err := svc.Update(adminCtx(), created.ID, user.UpdateRequest{Roles: []string{authz.RoleAdmin}}); err != nil {
+	if _, err := svc.Update(adminCtx(), created.ID, user.UpdateRequest{Roles: []string{authz.RoleSindico}}); err != nil {
 		t.Fatal(err)
 	}
 	if len(spy.revoked) != 1 || spy.revoked[0] != created.ID {

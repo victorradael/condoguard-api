@@ -34,9 +34,9 @@ func callerCtx(condoID, userID string, roles ...string) context.Context {
 	return middleware.WithIdentity(tenant.WithCondominiumID(context.Background(), condoID), userID, roles)
 }
 
-func adminCtx() context.Context { return callerCtx("condo-a", "admin-1", authz.RoleAdmin) }
+func adminCtx() context.Context { return callerCtx("condo-a", "admin-1", authz.RoleSindico) }
 
-func userCtx(userID string) context.Context { return callerCtx("condo-a", userID, authz.RoleUser) }
+func userCtx(userID string) context.Context { return callerCtx("condo-a", userID, authz.RoleMorador) }
 
 func listAll(t *testing.T, svc *expense.Service, ctx context.Context, f expense.Filter) []*expense.Expense {
 	t.Helper()
@@ -486,7 +486,7 @@ func TestExpense_Security_ListIgnoresScopeFromCaller(t *testing.T) {
 func TestExpense_Security_OtherCondominiumAdminCannotAccess(t *testing.T) {
 	svc := newService()
 	e := mustCreate(t, svc, expense.CreateRequest{ResidentID: "res-a"})
-	other := callerCtx("condo-b", "admin-b", authz.RoleAdmin)
+	other := callerCtx("condo-b", "admin-b", authz.RoleSindico)
 
 	if _, err := svc.GetByID(other, e.ID); !expense.IsNotFoundError(err) {
 		t.Errorf("get: expected ErrNotFound, got %v", err)

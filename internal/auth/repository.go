@@ -3,6 +3,8 @@ package auth
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,9 +25,20 @@ var ErrTokenNotFound = errors.New("auth: refresh token not found")
 // Repository defines the persistence contract for the auth domain.
 // Interfaces are defined on the consumer side (idiomatic Go).
 // E-mails are passed already normalised (see pkg/email).
+//
+// An account is global (one e-mail, one account); its roles belong to its
+// membership in each condominium.
 type Repository interface {
+	// Save creates the account with a membership in the condominium of ctx,
+	// with user.Roles, in one step.
 	Save(ctx context.Context, user *User) error
+	// FindByEmail finds the account in the whole base (login happens before the
+	// condominium is known). The roles are not filled in: see Memberships.
 	FindByEmail(ctx context.Context, email string) (*User, error)
+	// Memberships lists the condominiums the account belongs to.
+	Memberships(ctx context.Context, userID string) ([]Membership, error)
+	// FindByID finds the account through its membership in the condominium of
+	// ctx; the roles are the ones it holds there.
 	FindByID(ctx context.Context, id string) (*User, error)
 }
 
@@ -46,19 +59,23 @@ type TokenStore interface {
 	Family(ctx context.Context, hash []byte) (string, error)
 	// RevokeFamily revokes every token of the session family.
 	RevokeFamily(ctx context.Context, familyID string) error
+	// CondominiumOf says which condominium issued the token; the refresh
+	// request itself carries no tenant. ErrTokenNotFound when unknown.
+	CondominiumOf(ctx context.Context, hash []byte) (string, error)
 }
 
 // ── In-memory (unit / integration without DB) ─────────────────────────────────
 
 type inMemoryRepository struct {
-	mu    sync.RWMutex
-	store map[string]*User // keyed by ID
+	mu          sync.RWMutex
+	store       map[string]*User               // keyed by ID
+	memberships map[string]map[string][]string // user ID → condominium ID → roles
 }
 
 // NewInMemoryRepository returns a thread-safe in-memory Repository.
 // Like the database, e-mails are unique across all condominiums.
 func NewInMemoryRepository() Repository {
-	return &inMemoryRepository{store: make(map[string]*User)}
+	return &inMemoryRepository{store: make(map[string]*User), memberships: make(map[string]map[string][]string)}
 }
 
 func (r *inMemoryRepository) Save(ctx context.Context, user *User) error {
@@ -79,18 +96,37 @@ func (r *inMemoryRepository) Save(ctx context.Context, user *User) error {
 	user.CondominiumID = condoID
 	cp := *user
 	r.store[user.ID] = &cp
+	r.memberships[user.ID] = map[string][]string{condoID: slices.Clone(user.Roles)}
 	return nil
 }
 
-func (r *inMemoryRepository) FindByEmail(ctx context.Context, email string) (*User, error) {
-	return r.find(ctx, func(u *User) bool { return u.Email == email })
+func (r *inMemoryRepository) FindByEmail(_ context.Context, email string) (*User, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, u := range r.store {
+		if u.Email == email {
+			cp := *u
+			cp.Roles, cp.CondominiumID = nil, ""
+			return &cp, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (r *inMemoryRepository) Memberships(_ context.Context, userID string) ([]Membership, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var out []Membership
+	for condo, roles := range r.memberships[userID] {
+		out = append(out, Membership{CondominiumID: condo, Name: condo, Roles: slices.Clone(roles)})
+	}
+	slices.SortFunc(out, func(a, b Membership) int { return strings.Compare(a.CondominiumID, b.CondominiumID) })
+	return out, nil
 }
 
 func (r *inMemoryRepository) FindByID(ctx context.Context, id string) (*User, error) {
-	return r.find(ctx, func(u *User) bool { return u.ID == id })
-}
-
-func (r *inMemoryRepository) find(ctx context.Context, match func(*User) bool) (*User, error) {
 	condoID, err := tenant.CondominiumID(ctx)
 	if err != nil {
 		return nil, err
@@ -98,13 +134,14 @@ func (r *inMemoryRepository) find(ctx context.Context, match func(*User) bool) (
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	for _, u := range r.store {
-		if u.CondominiumID == condoID && match(u) {
-			cp := *u
-			return &cp, nil
-		}
+	u, ok := r.store[id]
+	roles, member := r.memberships[id][condoID]
+	if !ok || !member {
+		return nil, ErrNotFound
 	}
-	return nil, ErrNotFound
+	cp := *u
+	cp.CondominiumID, cp.Roles = condoID, slices.Clone(roles)
+	return &cp, nil
 }
 
 type memToken struct {
@@ -169,6 +206,16 @@ func (s *inMemoryTokenStore) Family(ctx context.Context, hash []byte) (string, e
 		return "", err
 	}
 	return t.session.FamilyID, nil
+}
+
+func (s *inMemoryTokenStore) CondominiumOf(_ context.Context, hash []byte) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.tokens[string(hash)]
+	if !ok {
+		return "", ErrTokenNotFound
+	}
+	return t.condoID, nil
 }
 
 func (s *inMemoryTokenStore) RevokeFamily(ctx context.Context, familyID string) error {

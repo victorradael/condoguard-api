@@ -18,8 +18,8 @@ import (
 const handlerSecret = "dGVzdC1zZWNyZXQta2V5LWZvci11bml0LXRlc3RpbmctMzJi"
 
 const (
-	condoA = "condo-a"
-	condoB = "condo-b"
+	condoA = dbtest.CondoA
+	condoB = dbtest.CondoB
 )
 
 var handlerJWT = pkgjwt.MustNewService(handlerSecret)
@@ -43,10 +43,12 @@ func token(t *testing.T, userID, condoID, role string) string {
 }
 
 // validToken is an admin of condo-a: the role allowed to manage units.
-func validToken(t *testing.T) string { return token(t, "admin-1", condoA, authz.RoleAdmin) }
+func validToken(t *testing.T) string { return token(t, "admin-1", condoA, authz.RoleSindico) }
 
-// userToken is a ROLE_USER (resident) of condo-a.
-func userToken(t *testing.T, userID string) string { return token(t, userID, condoA, authz.RoleUser) }
+// userToken is a morador (resident) of condo-a.
+func userToken(t *testing.T, userID string) string {
+	return token(t, userID, condoA, authz.RoleMorador)
+}
 
 func authReq(method, path, token string, body any) *http.Request {
 	var req *http.Request
@@ -400,8 +402,8 @@ func TestHandler_Security_OtherCondominiumTokenCannotAccessUnit_Returns404(t *te
 
 	// Admin of condo-b, and even a user with the same user ID as the owner.
 	foreign := map[string]string{
-		"admin of condo-b":         token(t, "admin-1", condoB, authz.RoleAdmin),
-		"same owner id in condo-b": token(t, "user-1", condoB, authz.RoleUser),
+		"admin of condo-b":         token(t, "admin-1", condoB, authz.RoleSindico),
+		"same owner id in condo-b": token(t, "user-1", condoB, authz.RoleMorador),
 	}
 	for name, tok := range foreign {
 		t.Run(name, func(t *testing.T) {
@@ -436,7 +438,7 @@ func TestHandler_Security_OtherCondominiumTokenCannotAccessUnit_Returns404(t *te
 
 func TestHandler_Security_CreateIsScopedToTokenCondominium(t *testing.T) {
 	router := newTestRouter(t)
-	adminB := token(t, "admin-b", condoB, authz.RoleAdmin)
+	adminB := token(t, "admin-b", condoB, authz.RoleSindico)
 
 	// The body's condominiumId does not pick the tenant: the token does.
 	createOwnedResident(t, router, adminB, "101", condoA, "user-1")
@@ -521,7 +523,7 @@ func TestHandler_Pagination_InvalidParams_Returns400(t *testing.T) {
 // ── Integration (PostgreSQL; requires TEST_DATABASE_URL) ───────────────────────
 
 func TestIntegration_Residents_CRUD(t *testing.T) {
-	router := newRouter(resident.NewPostgresRepository(dbtest.NewPool(t)))
+	router := newRouter(resident.NewPostgresRepository(dbtest.NewPool(t, dbtest.CondoA, dbtest.CondoB)))
 
 	crudRoundTrip(t, router, validToken(t), "/residents",
 		map[string]any{"unitNumber": "101", "floor": 1, "condominiumId": "condo-1", "ownerId": "user-1"},
@@ -538,7 +540,7 @@ func TestIntegration_Residents_CRUD(t *testing.T) {
 
 // Regression (FAB-11 N1): a floor outside int32 is a validation error, not a 500.
 func TestIntegration_Residents_Update_FloorOutOfRange_Returns422(t *testing.T) {
-	router := newRouter(resident.NewPostgresRepository(dbtest.NewPool(t)))
+	router := newRouter(resident.NewPostgresRepository(dbtest.NewPool(t, dbtest.CondoA, dbtest.CondoB)))
 	tok := validToken(t)
 	id := idOf(createResident(t, router, tok, "901", "condo-1"))
 
@@ -552,12 +554,12 @@ func TestIntegration_Residents_Update_FloorOutOfRange_Returns422(t *testing.T) {
 }
 
 func TestIntegration_Security_Residents_RoleAndTenantIsolation(t *testing.T) {
-	router := newRouter(resident.NewPostgresRepository(dbtest.NewPool(t)))
+	router := newRouter(resident.NewPostgresRepository(dbtest.NewPool(t, dbtest.CondoA, dbtest.CondoB)))
 	admin := validToken(t)
 	own := idOf(createOwnedResident(t, router, admin, "101", "condo-1", "user-a"))
 	other := idOf(createOwnedResident(t, router, admin, "102", "condo-1", "user-b"))
 	userA := userToken(t, "user-a")
-	adminB := token(t, "admin-1", condoB, authz.RoleAdmin)
+	adminB := token(t, "admin-1", condoB, authz.RoleSindico)
 
 	p := decodePage(t, serve(router, http.MethodGet, "/residents", userA, nil))
 	if p.Total != 1 || len(p.Items) != 1 || idOf(p.Items[0]) != own {

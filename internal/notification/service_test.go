@@ -40,8 +40,8 @@ func asUser(userID string, roles ...string) context.Context {
 	return middleware.WithIdentity(ctx, userID, roles)
 }
 
-func adminCtx() context.Context         { return asUser("admin-1", authz.RoleAdmin) }
-func userCtx(id string) context.Context { return asUser(id, authz.RoleUser) }
+func adminCtx() context.Context         { return asUser("admin-1", authz.RoleSindico) }
+func userCtx(id string) context.Context { return asUser(id, authz.RoleMorador) }
 
 func mustCreate(t *testing.T, svc *notification.Service, req notification.CreateRequest) *notification.Notification {
 	t.Helper()
@@ -467,7 +467,7 @@ func TestNotification_Security_ReadStateIsPerRecipient(t *testing.T) {
 func TestNotification_Security_OtherTenantIsInvisible(t *testing.T) {
 	svc := newService()
 	n := mustCreate(t, svc, notification.CreateRequest{Message: "Aviso", ResidentIDs: []string{"r1"}})
-	other := middleware.WithIdentity(tenant.WithCondominiumID(context.Background(), "condo-b"), "admin-b", []string{authz.RoleAdmin})
+	other := middleware.WithIdentity(tenant.WithCondominiumID(context.Background(), "condo-b"), "admin-b", []string{authz.RoleSindico})
 
 	if _, err := svc.GetByID(other, n.ID); !notification.IsNotFoundError(err) {
 		t.Errorf("GetByID: expected ErrNotFound, got %v", err)

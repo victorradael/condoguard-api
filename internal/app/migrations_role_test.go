@@ -51,6 +51,7 @@ func splitRoles(t *testing.T) (ownerURL, appURL string) {
 		"GRANT USAGE ON SCHEMA public TO " + appRole,
 		"ALTER DEFAULT PRIVILEGES FOR ROLE " + owner + " IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO " + appRole,
 		"ALTER DEFAULT PRIVILEGES FOR ROLE " + owner + " IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO " + appRole,
+		"ALTER DEFAULT PRIVILEGES FOR ROLE " + owner + " IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO " + appRole,
 	} {
 		if _, err := admin.Exec(ctx, q); err != nil {
 			t.Fatalf("%s: %v", q, err)

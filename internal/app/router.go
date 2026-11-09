@@ -18,8 +18,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/victorradael/condoguard/api/internal/audit"
 	"github.com/victorradael/condoguard/api/internal/auth"
 	"github.com/victorradael/condoguard/api/internal/authz"
+	"github.com/victorradael/condoguard/api/internal/condominium"
 	"github.com/victorradael/condoguard/api/internal/db"
 	"github.com/victorradael/condoguard/api/internal/expense"
 	"github.com/victorradael/condoguard/api/internal/middleware"
@@ -40,7 +42,7 @@ type Config struct {
 	MigrationsURL         string         // DATABASE_MIGRATIONS_URL: schema owner role for the migrations (default DatabaseURL)
 	MigrateOnStart        bool           // DB_MIGRATE_ON_START (default true)
 	RedisURL              string         // REDIS_URL; empty = in-memory login limiter (single instance)
-	CondominiumID         string         // DEFAULT_CONDOMINIUM_ID (default "default") — tenant of sign-up and login until 1b
+	CondominiumID         string         // DEFAULT_CONDOMINIUM_ID: id or name of the condominium that receives public sign-ups (default "default"); none found = sign-up closed
 	LoginMaxAttempts      int            // LOGIN_MAX_ATTEMPTS per IP + e-mail (default 5)
 	LoginMaxAttemptsPerIP int            // LOGIN_MAX_ATTEMPTS_PER_IP across e-mails (default 50)
 	LoginLockoutWindow    time.Duration  // LOGIN_LOCKOUT_WINDOW (default 15m)
@@ -247,6 +249,19 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger, metrics *middlewa
 		}
 	}
 
+	if a.pool != nil {
+		// The default condominium may be given by name; the database knows its id.
+		id, found, err := condominium.NewPostgresRepository(a.pool).Lookup(ctx, cfg.CondominiumID)
+		if err != nil {
+			a.Close()
+			return nil, fmt.Errorf("DEFAULT_CONDOMINIUM_ID: %w", err)
+		}
+		cfg.CondominiumID = id
+		if !found {
+			slog.Warn("DEFAULT_CONDOMINIUM_ID matches no condominium — public sign-up is closed")
+		}
+	}
+
 	a.Handler = newHandler(cfg, jwtSvc, a.pool, limiters{login: limiter, loginIP: ipLimiter, register: registerLimiter}, logger, metrics)
 	return a, nil
 }
@@ -279,7 +294,7 @@ func newHandler(cfg Config, jwtSvc *pkgjwt.Service, pool *pgxpool.Pool, lim limi
 	mux := http.NewServeMux()
 	authMW := middleware.Authenticate(jwtSvc, cfg.CORSAllowedOrigins...)
 	adminOnly := func(h http.Handler) http.Handler {
-		return authMW(middleware.RequireRole(authz.RoleAdmin)(h))
+		return authMW(authz.RequirePermission(authz.PermUsersManage)(h))
 	}
 
 	// ── Health (public) ────────────────────────────────────────────────────────
@@ -301,6 +316,9 @@ func newHandler(cfg Config, jwtSvc *pkgjwt.Service, pool *pgxpool.Pool, lim limi
 		shopRepo     shopowner.Repository
 		expenseRepo  expense.Repository
 		notifRepo    notification.Repository
+		condoRepo    condominium.Repository
+		auditStore   audit.Store
+		trail        audit.Trail
 	)
 	if pool != nil {
 		authRepo = auth.NewPostgresRepository(pool)
@@ -310,6 +328,9 @@ func newHandler(cfg Config, jwtSvc *pkgjwt.Service, pool *pgxpool.Pool, lim limi
 		shopRepo = shopowner.NewPostgresRepository(pool)
 		expenseRepo = expense.NewPostgresRepository(pool)
 		notifRepo = notification.NewPostgresRepository(pool)
+		condoRepo = condominium.NewPostgresRepository(pool)
+		auditStore = audit.NewPostgresStore(pool)
+		trail = audit.Trail{Rec: auditStore, Tx: db.PoolTx{Pool: pool}}
 	} else {
 		authRepo = auth.NewInMemoryRepository()
 		tokenStore = auth.NewInMemoryTokenStore()
@@ -318,10 +339,13 @@ func newHandler(cfg Config, jwtSvc *pkgjwt.Service, pool *pgxpool.Pool, lim limi
 		shopRepo = shopowner.NewInMemoryRepository()
 		expenseRepo = expense.NewInMemoryRepository()
 		notifRepo = notification.NewInMemoryRepository()
+		condoRepo = condominium.NewInMemoryRepository()
+		auditStore = audit.NewInMemoryStore()
+		trail = audit.Trail{Rec: auditStore, Tx: db.NoTx{}}
 	}
 
-	residentSvc := resident.NewService(residentRepo)
-	shopSvc := shopowner.NewService(shopRepo)
+	residentSvc := resident.NewService(residentRepo).WithAudit(trail)
+	shopSvc := shopowner.NewService(shopRepo).WithAudit(trail)
 	units := authz.UnitResolverFunc(func(ctx context.Context, userID string) (authz.Units, error) {
 		rids, err := residentSvc.UnitIDsOwnedBy(ctx, userID)
 		if err != nil {
@@ -343,10 +367,14 @@ func newHandler(cfg Config, jwtSvc *pkgjwt.Service, pool *pgxpool.Pool, lim limi
 	mux.Handle("POST /auth/register", middleware.IPLimit(lim.register, "too many sign-ups, try again later")(authHandler))
 	mux.Handle("/auth/", authHandler)
 
-	// ── Users (/users/me: any user; the rest: ROLE_ADMIN) ──────────────────────
-	userHandler := user.NewHandler(user.NewService(userRepo), authMW)
+	// ── Users (/users/me: any user; the rest: sindico) ──────────────────────
+	userHandler := user.NewHandler(user.NewService(userRepo).WithAudit(trail), authMW)
 	mux.Handle("/users", userHandler)
 	mux.Handle("/users/", userHandler)
+
+	// ── Condominium (current) and audit trail ──────────────────────────────────
+	mux.Handle("/condominium", condominium.NewHandler(condoRepo, authMW))
+	mux.Handle("/audit-log", audit.NewHandler(auditStore, authMW))
 
 	// ── Residents (units) ──────────────────────────────────────────────────────
 	residentHandler := resident.NewHandler(residentSvc, authMW)
@@ -361,12 +389,12 @@ func newHandler(cfg Config, jwtSvc *pkgjwt.Service, pool *pgxpool.Pool, lim limi
 	}
 
 	// ── Expenses ──────────────────────────────────────────────────────────────
-	expenseHandler := expense.NewHandler(expense.NewService(expenseRepo, units), authMW)
+	expenseHandler := expense.NewHandler(expense.NewService(expenseRepo, units).WithAudit(trail), authMW)
 	mux.Handle("/expenses", expenseHandler)
 	mux.Handle("/expenses/", expenseHandler)
 
 	// ── Notifications ─────────────────────────────────────────────────────────
-	notifHandler := notification.NewHandler(notification.NewService(notifRepo, units), authMW)
+	notifHandler := notification.NewHandler(notification.NewService(notifRepo, units).WithAudit(trail), authMW)
 	mux.Handle("/notifications", notifHandler)
 	mux.Handle("/notifications/", notifHandler)
 
@@ -378,7 +406,9 @@ func newHandler(cfg Config, jwtSvc *pkgjwt.Service, pool *pgxpool.Pool, lim limi
 					metrics.Middleware(
 						middleware.MaxBody(middleware.DefaultMaxBodyBytes)(
 							middleware.ClientIP(cfg.TrustedProxies)(
-								tenant.Middleware(cfg.CondominiumID)(mux),
+								middleware.WithRequestMeta(
+									tenant.Middleware(cfg.CondominiumID)(mux),
+								),
 							),
 						),
 					),

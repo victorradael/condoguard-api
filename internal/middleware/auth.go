@@ -55,6 +55,7 @@ func Authenticate(jwtSvc *pkgjwt.Service, allowedOrigins ...string) func(http.Ha
 			ctx := context.WithValue(r.Context(), userIDKey, claims.UserID)
 			ctx = context.WithValue(ctx, rolesKey, claims.Roles)
 			ctx = tenant.WithCondominiumID(ctx, claims.CondominiumID)
+			ctx = tenant.WithUserID(ctx, claims.UserID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

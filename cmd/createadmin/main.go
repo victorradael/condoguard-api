@@ -1,15 +1,18 @@
-// Command createadmin creates an administrator (ROLE_ADMIN) account.
+// Command createadmin creates the first manager of a condominium.
 //
-// Public sign-up (POST /auth/register) only creates residents, and only an
-// admin can create other admins (POST /users), so the first admin of a
-// condominium is created with this command:
+// Public sign-up (POST /auth/register) only creates residents, and only a
+// síndico or administradora can create other users (POST /users), so the first
+// one of a condominium is created with this command:
 //
 //	ADMIN_EMAIL=sindico@exemplo.com ADMIN_USERNAME=sindico \
 //	  go run ./cmd/createadmin < senha.txt
 //
 // The password is read from the first line of stdin (or ADMIN_PASSWORD) and
 // must meet the password policy. It reads DATABASE_URL and
-// DEFAULT_CONDOMINIUM_ID (default "default"); migrations must be applied.
+// DEFAULT_CONDOMINIUM_ID (an id or a name; default "default"); migrations must
+// be applied. When no condominium matches, one with that name is created
+// (under the administradora named in ADMINISTRATOR_NAME, if set). ADMIN_ROLE
+// is sindico (default) or administradora.
 package main
 
 import (
@@ -21,6 +24,7 @@ import (
 	"time"
 
 	"github.com/victorradael/condoguard/api/internal/authz"
+	"github.com/victorradael/condoguard/api/internal/condominium"
 	"github.com/victorradael/condoguard/api/internal/db"
 	"github.com/victorradael/condoguard/api/internal/tenant"
 	"github.com/victorradael/condoguard/api/internal/user"
@@ -63,16 +67,38 @@ func run() error {
 	}
 	defer pool.Close()
 
-	ctx = authz.AsOperator(tenant.WithCondominiumID(ctx, condoID))
+	role := os.Getenv("ADMIN_ROLE")
+	if role == "" {
+		role = authz.RoleSindico
+	}
+	if role != authz.RoleSindico && role != authz.RoleAdministradora {
+		return fmt.Errorf("ADMIN_ROLE must be %s or %s", authz.RoleSindico, authz.RoleAdministradora)
+	}
+
+	condos := condominium.NewPostgresRepository(pool)
+	id, found, err := condos.Lookup(ctx, condoID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		c, err := condos.Create(ctx, condoID, os.Getenv("ADMINISTRATOR_NAME"))
+		if err != nil {
+			return err
+		}
+		id = c.ID
+		fmt.Printf("condominium %q created (id %s)\n", c.Name, c.ID)
+	}
+
+	ctx = authz.AsOperator(tenant.WithCondominiumID(ctx, id))
 	u, err := user.NewService(user.NewPostgresRepository(pool)).Create(ctx, user.CreateRequest{
 		Username: username,
 		Email:    email,
 		Password: pw,
-		Roles:    []string{authz.RoleAdmin},
+		Roles:    []string{role},
 	})
 	if err != nil {
 		return err
 	}
-	fmt.Printf("admin %s created in condominium %q (id %s)\n", u.Email, condoID, u.ID)
+	fmt.Printf("%s %s created in condominium %s (id %s)\n", role, u.Email, id, u.ID)
 	return nil
 }

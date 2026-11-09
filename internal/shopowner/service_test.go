@@ -23,10 +23,10 @@ func ctxAs(condo, userID string, roles ...string) context.Context {
 }
 
 // adminCtx is an admin of condo-a.
-func adminCtx() context.Context { return ctxAs(condoA, "admin-1", authz.RoleAdmin) }
+func adminCtx() context.Context { return ctxAs(condoA, "admin-1", authz.RoleSindico) }
 
-// userCtx is a ROLE_USER of condo-a.
-func userCtx(userID string) context.Context { return ctxAs(condoA, userID, authz.RoleUser) }
+// userCtx is a morador of condo-a.
+func userCtx(userID string) context.Context { return ctxAs(condoA, userID, authz.RoleMorador) }
 
 func mustCreate(t *testing.T, svc *shopowner.Service, ctx context.Context, name, cnpj, owner string) *shopowner.ShopOwner {
 	t.Helper()
@@ -142,7 +142,7 @@ func TestShopOwner_Create_DuplicateCNPJ_ReturnsDuplicateError(t *testing.T) {
 func TestShopOwner_Create_SameCNPJInOtherCondominium_Succeeds(t *testing.T) {
 	svc := newService()
 	mustCreate(t, svc, adminCtx(), "Loja A", "11.222.333/0001-81", "user-1")
-	mustCreate(t, svc, ctxAs(condoB, "admin-b", authz.RoleAdmin), "Loja B", "11222333000181", "user-1")
+	mustCreate(t, svc, ctxAs(condoB, "admin-b", authz.RoleSindico), "Loja B", "11222333000181", "user-1")
 }
 
 // ── GetByID ───────────────────────────────────────────────────────────────────
@@ -296,7 +296,7 @@ func TestShopOwner_UnitIDsOwnedBy_ReturnsOnlyOwnersShopsInTenant(t *testing.T) {
 	a1 := mustCreate(t, svc, adminCtx(), "A1", "11.222.333/0001-81", "user-a")
 	mustCreate(t, svc, adminCtx(), "B1", "45.997.418/0001-53", "user-b")
 	a2 := mustCreate(t, svc, adminCtx(), "A2", "11.444.777/0001-61", "user-a")
-	mustCreate(t, svc, ctxAs(condoB, "admin-b", authz.RoleAdmin), "A in B", "11.222.333/0001-81", "user-a")
+	mustCreate(t, svc, ctxAs(condoB, "admin-b", authz.RoleSindico), "A in B", "11.222.333/0001-81", "user-a")
 
 	ids, err := svc.UnitIDsOwnedBy(userCtx("user-a"), "user-a")
 	if err != nil {
@@ -339,7 +339,7 @@ func TestService_Security_NoIdentity_ReturnsUnauthenticated(t *testing.T) {
 
 func TestService_Security_MissingTenant_FailsClosed(t *testing.T) {
 	svc := newService()
-	ctx := middleware.WithIdentity(context.Background(), "admin-1", []string{authz.RoleAdmin})
+	ctx := middleware.WithIdentity(context.Background(), "admin-1", []string{authz.RoleSindico})
 
 	if _, err := svc.Create(ctx, shopowner.CreateRequest{ShopName: "X", CNPJ: "11222333000181", OwnerID: "u"}); !errors.Is(err, tenant.ErrMissing) {
 		t.Errorf("Create: expected tenant.ErrMissing, got %v", err)
@@ -397,7 +397,7 @@ func TestService_Security_UserSeesOnlyOwnShops(t *testing.T) {
 func TestService_Security_OtherCondominium_SeesNothing(t *testing.T) {
 	svc := newService()
 	created := mustCreate(t, svc, adminCtx(), "A", "11.222.333/0001-81", "user-1")
-	adminB := ctxAs(condoB, "admin-b", authz.RoleAdmin)
+	adminB := ctxAs(condoB, "admin-b", authz.RoleSindico)
 
 	if _, err := svc.GetByID(adminB, created.ID); !shopowner.IsNotFoundError(err) {
 		t.Errorf("GetByID: expected ErrNotFound, got %v", err)

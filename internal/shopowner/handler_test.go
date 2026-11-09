@@ -18,8 +18,8 @@ import (
 const handlerSecret = "dGVzdC1zZWNyZXQta2V5LWZvci11bml0LXRlc3RpbmctMzJi"
 
 const (
-	condoA = "condo-a"
-	condoB = "condo-b"
+	condoA = dbtest.CondoA
+	condoB = dbtest.CondoB
 )
 
 var testJWT = pkgjwt.MustNewService(handlerSecret)
@@ -44,12 +44,12 @@ func tokenFor(t *testing.T, userID, condo string, roles ...string) string {
 
 // adminToken is an admin of condo-a: may manage every shop of the condominium.
 func adminToken(t *testing.T) string {
-	return tokenFor(t, "admin-1", condoA, authz.RoleAdmin)
+	return tokenFor(t, "admin-1", condoA, authz.RoleSindico)
 }
 
-// userToken is a plain ROLE_USER of condo-a.
+// userToken is a plain morador of condo-a.
 func userToken(t *testing.T, userID string) string {
-	return tokenFor(t, userID, condoA, authz.RoleUser)
+	return tokenFor(t, userID, condoA, authz.RoleMorador)
 }
 
 func authReq(method, path, token string, body any) *http.Request {
@@ -338,7 +338,7 @@ func TestHandler_BothPrefixes_ShareTheSameData(t *testing.T) {
 	}
 }
 
-// ── Security: ROLE_USER cannot write ──────────────────────────────────────────
+// ── Security: morador cannot write ──────────────────────────────────────────
 
 func TestHandler_Security_UserCannotCreate_Returns403(t *testing.T) {
 	router := newTestRouter(t)
@@ -387,7 +387,7 @@ func TestHandler_Security_UserCannotUpdateOrDelete_Returns403(t *testing.T) {
 	}
 }
 
-// ── Security: ROLE_USER only sees their own shops ─────────────────────────────
+// ── Security: morador only sees their own shops ─────────────────────────────
 
 func TestHandler_Security_UserListsOnlyOwnShops(t *testing.T) {
 	router := newTestRouter(t)
@@ -446,9 +446,9 @@ func TestHandler_Security_OtherCondominiumAdmin_CannotTouchShop_Returns404(t *te
 	adminA := adminToken(t)
 	id := fmt.Sprintf("%v", createShopFor(t, router, adminA, "Loja A", shopCNPJs[0], "user-1")["id"])
 
-	adminB := tokenFor(t, "admin-b", condoB, authz.RoleAdmin)
+	adminB := tokenFor(t, "admin-b", condoB, authz.RoleSindico)
 	// Same user ID as the shop owner but in another condominium.
-	ownerInB := tokenFor(t, "user-1", condoB, authz.RoleUser)
+	ownerInB := tokenFor(t, "user-1", condoB, authz.RoleMorador)
 
 	for _, prefix := range shopowner.Prefixes {
 		for name, tok := range map[string]string{"adminB": adminB, "ownerInB": ownerInB} {
@@ -482,7 +482,7 @@ func TestHandler_Security_OtherCondominiumAdmin_CannotTouchShop_Returns404(t *te
 func TestHandler_Security_SameCNPJInOtherCondominium_IsIndependent(t *testing.T) {
 	router := newTestRouter(t)
 	createShop(t, router, adminToken(t), "Loja A", shopCNPJs[0])
-	adminB := tokenFor(t, "admin-b", condoB, authz.RoleAdmin)
+	adminB := tokenFor(t, "admin-b", condoB, authz.RoleSindico)
 	createShop(t, router, adminB, "Loja B", shopCNPJs[0]) // fails the test on 409
 
 	if l := decodeList(t, serve(router, http.MethodGet, "/shop-owners", adminB, nil)); l.Total != 1 || l.Items[0]["shopName"] != "Loja B" {
@@ -562,7 +562,7 @@ func TestHandler_List_InvalidPagination_Returns400(t *testing.T) {
 
 func newPostgresRouter(t *testing.T) http.Handler {
 	t.Helper()
-	return newRouter(shopowner.NewPostgresRepository(dbtest.NewPool(t)))
+	return newRouter(shopowner.NewPostgresRepository(dbtest.NewPool(t, dbtest.CondoA, dbtest.CondoB)))
 }
 
 func TestIntegration_ShopOwners_CRUD(t *testing.T) {
@@ -609,7 +609,7 @@ func TestIntegration_Security_ShopOwners_RolesAndTenants(t *testing.T) {
 		t.Errorf("user list page 1/1: %+v", l)
 	}
 
-	adminB := tokenFor(t, "admin-b", condoB, authz.RoleAdmin)
+	adminB := tokenFor(t, "admin-b", condoB, authz.RoleSindico)
 	if rec := serve(router, http.MethodGet, "/shop-owners/"+a, adminB, nil); rec.Code != http.StatusNotFound {
 		t.Errorf("condo-b GET: expected 404, got %d", rec.Code)
 	}

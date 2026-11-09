@@ -10,71 +10,110 @@ import (
 	"github.com/google/uuid"
 )
 
+type Administrator struct {
+	ID        uuid.UUID
+	Name      string
+	CreatedAt time.Time
+}
+
+type AuditLog struct {
+	ID            int64
+	CondominiumID uuid.UUID
+	OccurredAt    time.Time
+	ActorUserID   *uuid.UUID
+	ActorRoles    []string
+	Action        string
+	Resource      string
+	ResourceID    string
+	Ip            string
+	UserAgent     string
+	RequestID     string
+	Before        []byte
+	After         []byte
+}
+
+type CondoMap struct {
+	Old string
+	New uuid.UUID
+}
+
+type Condominium struct {
+	ID              uuid.UUID
+	AdministratorID *uuid.UUID
+	Name            string
+	CreatedAt       time.Time
+}
+
 type Expense struct {
 	ID            uuid.UUID
-	CondominiumID string
 	Description   string
 	AmountCents   int64
 	DueDate       time.Time
 	ResidentID    string
 	ShopOwnerID   string
 	CreatedAt     time.Time
+	CondominiumID uuid.UUID
+}
+
+type Membership struct {
+	UserID        uuid.UUID
+	CondominiumID uuid.UUID
+	Roles         []string
+	CreatedAt     time.Time
 }
 
 type Notification struct {
 	ID            uuid.UUID
-	CondominiumID string
 	Message       string
 	CreatedByID   string
 	CreatedAt     time.Time
 	ResidentIds   []string
 	ShopOwnerIds  []string
+	CondominiumID uuid.UUID
 }
 
 type NotificationRead struct {
 	NotificationID uuid.UUID
 	UserID         uuid.UUID
-	CondominiumID  string
 	ReadAt         time.Time
+	CondominiumID  uuid.UUID
 }
 
 type RefreshToken struct {
 	ID            uuid.UUID
-	CondominiumID string
 	UserID        uuid.UUID
 	FamilyID      uuid.UUID
 	TokenHash     []byte
 	CreatedAt     time.Time
 	ExpiresAt     time.Time
 	RevokedAt     *time.Time
+	CondominiumID uuid.UUID
 }
 
 type Resident struct {
 	ID             uuid.UUID
-	CondominiumID  string
 	CondominiumRef string
 	UnitNumber     string
 	Floor          int32
 	OwnerID        string
 	CreatedAt      time.Time
+	CondominiumID  uuid.UUID
 }
 
 type ShopOwner struct {
 	ID            uuid.UUID
-	CondominiumID string
 	ShopName      string
 	Cnpj          string
 	Floor         int32
 	OwnerID       string
 	CreatedAt     time.Time
+	CondominiumID uuid.UUID
 }
 
 type User struct {
-	ID            uuid.UUID
-	CondominiumID string
-	Username      string
-	Email         string
-	PasswordHash  string
-	Roles         []string
-	CreatedAt     time.Time
+	ID           uuid.UUID
+	Username     string
+	Email        string
+	PasswordHash string
+	CreatedAt    time.Time
 }

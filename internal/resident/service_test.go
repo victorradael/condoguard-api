@@ -23,10 +23,10 @@ func identityCtx(condoID, userID, role string) context.Context {
 }
 
 // adminCtx is an admin of condo-a.
-func adminCtx() context.Context { return identityCtx(condoA, "admin-1", authz.RoleAdmin) }
+func adminCtx() context.Context { return identityCtx(condoA, "admin-1", authz.RoleSindico) }
 
-// userCtx is a ROLE_USER of condo-a.
-func userCtx(userID string) context.Context { return identityCtx(condoA, userID, authz.RoleUser) }
+// userCtx is a morador of condo-a.
+func userCtx(userID string) context.Context { return identityCtx(condoA, userID, authz.RoleMorador) }
 
 func mustCreate(t *testing.T, svc *resident.Service, req resident.CreateRequest) *resident.Resident {
 	t.Helper()
@@ -395,7 +395,7 @@ func TestService_Security_UserSeesOnlyOwnUnits(t *testing.T) {
 func TestService_Security_OtherCondominiumCannotAccessUnit(t *testing.T) {
 	svc := newService()
 	r := mustCreate(t, svc, resident.CreateRequest{UnitNumber: "101", Floor: 1, CondominiumID: "condo-1", OwnerID: "user-1"})
-	adminB := identityCtx(condoB, "admin-1", authz.RoleAdmin)
+	adminB := identityCtx(condoB, "admin-1", authz.RoleSindico)
 
 	if _, err := svc.GetByID(adminB, r.ID); !errors.Is(err, resident.ErrNotFound) {
 		t.Errorf("GetByID: expected ErrNotFound, got %v", err)
@@ -452,7 +452,7 @@ func TestService_UnitIDsOwnedBy(t *testing.T) {
 	if !slices.Equal(ids, want) {
 		t.Errorf("expected %v, got %v", want, ids)
 	}
-	if ids, _ := svc.UnitIDsOwnedBy(identityCtx(condoB, "x", authz.RoleAdmin), "user-a"); len(ids) != 0 {
+	if ids, _ := svc.UnitIDsOwnedBy(identityCtx(condoB, "x", authz.RoleSindico), "user-a"); len(ids) != 0 {
 		t.Errorf("another condominium must see no units, got %v", ids)
 	}
 }
