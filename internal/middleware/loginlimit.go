@@ -9,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"math"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -40,8 +39,8 @@ const loginBodyLimit = 64 << 10
 // used for the key is the one the handler authenticates, so a login to one
 // account can never reset the counter of another.
 //
-// The client IP is taken from RemoteAddr only; X-Forwarded-For is not trusted
-// until the reverse proxy (Caddy) is in place and configured as trusted.
+// The client IP is the one resolved by ClientIP (X-Real-IP from a trusted
+// proxy), or RemoteAddr when that middleware is not installed.
 // If the limiter backend fails, the request is let through and the error is
 // logged: an unavailable Redis must not take logins down.
 func LoginLimit(pairLimiter, ipLimiter ratelimit.Limiter) func(http.Handler) http.Handler {
@@ -190,14 +189,6 @@ func readLoginEmail(r *http.Request) (email string, ok bool) {
 		return "", false
 	}
 	return body.Email, true
-}
-
-func clientIP(r *http.Request) string {
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return ip
 }
 
 // emailHash identifies the account without storing the raw e-mail. It is

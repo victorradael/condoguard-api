@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -34,24 +35,26 @@ import (
 
 // Config holds the infrastructure settings read from the environment.
 type Config struct {
-	DatabaseURL           string        // DATABASE_URL; empty = in-memory repositories (dev/tests only)
-	MigrationsURL         string        // DATABASE_MIGRATIONS_URL: schema owner role for the migrations (default DatabaseURL)
-	MigrateOnStart        bool          // DB_MIGRATE_ON_START (default true)
-	RedisURL              string        // REDIS_URL; empty = in-memory login limiter (single instance)
-	CondominiumID         string        // DEFAULT_CONDOMINIUM_ID (default "default") — tenant of sign-up and login until 1b
-	LoginMaxAttempts      int           // LOGIN_MAX_ATTEMPTS per IP + e-mail (default 5)
-	LoginMaxAttemptsPerIP int           // LOGIN_MAX_ATTEMPTS_PER_IP across e-mails (default 50)
-	LoginLockoutWindow    time.Duration // LOGIN_LOCKOUT_WINDOW (default 15m)
-	RegisterMaxPerIP      int           // REGISTER_MAX_PER_IP sign-ups per IP and window (default 10; 0 in Config disables)
-	RegisterWindow        time.Duration // REGISTER_WINDOW (default 1h)
-	JWTSecret             string        // JWT_SECRET_KEY (required): Base64 of >= 32 random bytes
-	AccessTokenTTL        time.Duration // ACCESS_TOKEN_TTL (default 15m)
-	RefreshTokenTTL       time.Duration // REFRESH_TOKEN_TTL (default 720h)
-	CORSAllowedOrigins    []string      // CORS_ALLOWED_ORIGINS (default http://localhost:3000); "*" is rejected
-	CookieSecure          bool          // COOKIE_SECURE (default true); false only for plain-HTTP local dev
-	CookieDomain          string        // COOKIE_DOMAIN (default: API host only)
-	CookiePathPrefix      string        // COOKIE_PATH_PREFIX: proxy prefix of the API as the browser sees it (e.g. /api; default none)
-	MetricsToken          string        // METRICS_TOKEN; empty disables /metrics
+	Production            bool           // APP_ENV=production: DATABASE_URL, REDIS_URL and CORS_ALLOWED_ORIGINS become required
+	DatabaseURL           string         // DATABASE_URL; empty = in-memory repositories (dev/tests only)
+	MigrationsURL         string         // DATABASE_MIGRATIONS_URL: schema owner role for the migrations (default DatabaseURL)
+	MigrateOnStart        bool           // DB_MIGRATE_ON_START (default true)
+	RedisURL              string         // REDIS_URL; empty = in-memory login limiter (single instance)
+	CondominiumID         string         // DEFAULT_CONDOMINIUM_ID (default "default") — tenant of sign-up and login until 1b
+	LoginMaxAttempts      int            // LOGIN_MAX_ATTEMPTS per IP + e-mail (default 5)
+	LoginMaxAttemptsPerIP int            // LOGIN_MAX_ATTEMPTS_PER_IP across e-mails (default 50)
+	LoginLockoutWindow    time.Duration  // LOGIN_LOCKOUT_WINDOW (default 15m)
+	RegisterMaxPerIP      int            // REGISTER_MAX_PER_IP sign-ups per IP and window (default 10; 0 in Config disables)
+	RegisterWindow        time.Duration  // REGISTER_WINDOW (default 1h)
+	JWTSecret             string         // JWT_SECRET_KEY (required): Base64 of >= 32 random bytes
+	AccessTokenTTL        time.Duration  // ACCESS_TOKEN_TTL (default 15m)
+	RefreshTokenTTL       time.Duration  // REFRESH_TOKEN_TTL (default 720h)
+	CORSAllowedOrigins    []string       // CORS_ALLOWED_ORIGINS (default http://localhost:3000); "*" is rejected
+	CookieSecure          bool           // COOKIE_SECURE (default true); false only for plain-HTTP local dev
+	CookieDomain          string         // COOKIE_DOMAIN (default: API host only)
+	CookiePathPrefix      string         // COOKIE_PATH_PREFIX: proxy prefix of the API as the browser sees it (e.g. /api; default none)
+	MetricsToken          string         // METRICS_TOKEN; empty disables /metrics
+	TrustedProxies        []netip.Prefix // TRUSTED_PROXIES: CIDRs whose X-Real-IP is the client IP (default none)
 }
 
 // ConfigFromEnv reads Config from environment variables, applying defaults.
@@ -59,6 +62,7 @@ type Config struct {
 // secret or a CORS wildcard): the API must not start insecurely.
 func ConfigFromEnv() (Config, error) {
 	cfg := Config{
+		Production:            os.Getenv("APP_ENV") == "production",
 		DatabaseURL:           os.Getenv("DATABASE_URL"),
 		MigrationsURL:         os.Getenv("DATABASE_MIGRATIONS_URL"),
 		MigrateOnStart:        true,
@@ -90,12 +94,23 @@ func ConfigFromEnv() (Config, error) {
 		return cfg, fmt.Errorf("COOKIE_PATH_PREFIX must look like /api (leading slash, no trailing slash)")
 	}
 	origins := os.Getenv("CORS_ALLOWED_ORIGINS")
+	if cfg.Production {
+		// Production must not fall back to in-memory state or dev defaults.
+		for _, req := range []struct{ env, v string }{{"DATABASE_URL", cfg.DatabaseURL}, {"REDIS_URL", cfg.RedisURL}, {"CORS_ALLOWED_ORIGINS", origins}} {
+			if req.v == "" {
+				return cfg, fmt.Errorf("%s is required when APP_ENV=production", req.env)
+			}
+		}
+	}
 	if origins == "" {
 		origins = "http://localhost:3000"
 	}
 	var err error
 	if cfg.CORSAllowedOrigins, err = middleware.ParseOrigins(origins); err != nil {
 		return cfg, fmt.Errorf("CORS_ALLOWED_ORIGINS: %w", err)
+	}
+	if cfg.TrustedProxies, err = middleware.ParseTrustedProxies(os.Getenv("TRUSTED_PROXIES")); err != nil {
+		return cfg, fmt.Errorf("TRUSTED_PROXIES: %w", err)
 	}
 	for _, b := range []struct {
 		env string
@@ -254,7 +269,7 @@ func NewRouter(logger *slog.Logger, metrics *middleware.Metrics) http.Handler {
 }
 
 // newHandler wires all domain routes and the global middleware stack:
-// SecurityHeaders → CORS → RequestID → Logging → Metrics → MaxBody → Tenant → mux.
+// SecurityHeaders → CORS → RequestID → Logging → Metrics → MaxBody → ClientIP → Tenant → mux.
 // limiters are the request limiters of the public auth routes; nil = off.
 type limiters struct {
 	login, loginIP, register ratelimit.Limiter
@@ -362,7 +377,9 @@ func newHandler(cfg Config, jwtSvc *pkgjwt.Service, pool *pgxpool.Pool, lim limi
 				middleware.Logging(logger)(
 					metrics.Middleware(
 						middleware.MaxBody(middleware.DefaultMaxBodyBytes)(
-							tenant.Middleware(cfg.CondominiumID)(mux),
+							middleware.ClientIP(cfg.TrustedProxies)(
+								tenant.Middleware(cfg.CondominiumID)(mux),
+							),
 						),
 					),
 				),
