@@ -37,6 +37,7 @@ import (
 type Config struct {
 	Production            bool           // APP_ENV=production: DATABASE_URL, REDIS_URL and CORS_ALLOWED_ORIGINS become required
 	DatabaseURL           string         // DATABASE_URL; empty = in-memory repositories (dev/tests only)
+	MigrationsURL         string         // DATABASE_MIGRATIONS_URL: schema owner role for the migrations (default DatabaseURL)
 	MigrateOnStart        bool           // DB_MIGRATE_ON_START (default true)
 	RedisURL              string         // REDIS_URL; empty = in-memory login limiter (single instance)
 	CondominiumID         string         // DEFAULT_CONDOMINIUM_ID (default "default") — tenant of sign-up and login until 1b
@@ -63,6 +64,7 @@ func ConfigFromEnv() (Config, error) {
 	cfg := Config{
 		Production:            os.Getenv("APP_ENV") == "production",
 		DatabaseURL:           os.Getenv("DATABASE_URL"),
+		MigrationsURL:         os.Getenv("DATABASE_MIGRATIONS_URL"),
 		MigrateOnStart:        true,
 		RedisURL:              os.Getenv("REDIS_URL"),
 		CondominiumID:         os.Getenv("DEFAULT_CONDOMINIUM_ID"),
@@ -147,6 +149,21 @@ func ConfigFromEnv() (Config, error) {
 	return cfg, nil
 }
 
+// migrateOnStart applies the pending migrations. With a migrations URL it
+// connects as that role (the schema owner), so the runtime role in
+// DATABASE_URL needs no DDL privilege; otherwise it reuses the runtime pool.
+func migrateOnStart(ctx context.Context, pool *pgxpool.Pool, migrationsURL string) error {
+	if migrationsURL == "" {
+		return db.MigrateUp(ctx, pool)
+	}
+	owner, err := db.NewPool(ctx, migrationsURL)
+	if err != nil {
+		return fmt.Errorf("DATABASE_MIGRATIONS_URL: %w", err)
+	}
+	defer owner.Close()
+	return db.MigrateUp(ctx, owner)
+}
+
 // App owns the process-wide resources: the single pgx pool, the single Redis
 // client and the HTTP handler built on top of them.
 type App struct {
@@ -189,7 +206,7 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger, metrics *middlewa
 		}
 		a.pool = pool
 		if cfg.MigrateOnStart {
-			if err := db.MigrateUp(ctx, pool); err != nil {
+			if err := migrateOnStart(ctx, pool, cfg.MigrationsURL); err != nil {
 				a.Close()
 				return nil, err
 			}
