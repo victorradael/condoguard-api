@@ -322,6 +322,7 @@ func buildPaths() map[string]PathItem {
 				RequestBody: jsonBody("LoginRequest", true),
 				Responses: map[string]*Response{
 					"200": jsonResp("Login bem-sucedido", "LoginResponse"),
+					"400": errResp("Corpo inválido: precisa ser um único objeto JSON de até 64 KiB"),
 					"401": errResp("Credenciais inválidas"),
 					"422": errResp("Dados inválidos"),
 					"429": errResp("Muitas tentativas com falha para este usuário a partir deste IP; tente após o tempo do cabeçalho Retry-After"),
@@ -453,6 +454,7 @@ func buildPaths() map[string]PathItem {
 					"401": errResp("Não autenticado"),
 					"404": errResp("Residência não encontrada"),
 					"409": errResp("Número de unidade já existe neste condomínio"),
+					"422": errResp("Dados inválidos"),
 				},
 			},
 			"delete": {
@@ -521,6 +523,7 @@ func buildPaths() map[string]PathItem {
 					"200": jsonResp("Loja atualizada", "ShopOwner"),
 					"401": errResp("Não autenticado"),
 					"404": errResp("Loja não encontrada"),
+					"422": errResp("Dados inválidos"),
 				},
 			},
 			"delete": {

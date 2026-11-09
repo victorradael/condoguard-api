@@ -64,6 +64,10 @@ func (h *handler) getByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "shopowner not found")
 			return
 		}
+		if errors.Is(err, ErrValidation) {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}

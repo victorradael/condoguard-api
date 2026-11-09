@@ -280,6 +280,23 @@ func TestIntegration_ShopOwners_CRUD(t *testing.T) {
 		})
 }
 
+// Regression (FAB-11 N1): a floor outside int32 is a validation error, not a 500.
+func TestIntegration_ShopOwners_Update_FloorOutOfRange_Returns422(t *testing.T) {
+	pool := dbtest.NewPool(t)
+	router := tenant.Middleware("condo-test")(shopowner.NewHandler(shopowner.NewService(shopowner.NewPostgresRepository(pool)), middleware.Authenticate(pkgjwt.NewService(handlerSecret))))
+	tok := validToken(t)
+	id := fmt.Sprintf("%v", createShop(t, router, tok, "Banca", "11222333000181")["id"])
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, authReq(http.MethodPut, "/shopOwners/"+id, tok, map[string]any{
+		"shopName": "Banca",
+		"floor":    int64(1) << 40,
+	}))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("expected 422, got %d — %s", rec.Code, rec.Body.String())
+	}
+}
+
 // crudRoundTrip drives create → get → list → update → delete through the HTTP
 // handler backed by the PostgreSQL repository.
 func crudRoundTrip(t *testing.T, router http.Handler, tok, base string, create, update map[string]any, check func(created, updated map[string]any)) {

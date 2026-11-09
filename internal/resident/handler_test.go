@@ -292,6 +292,23 @@ func TestIntegration_Residents_CRUD(t *testing.T) {
 		})
 }
 
+// Regression (FAB-11 N1): a floor outside int32 is a validation error, not a 500.
+func TestIntegration_Residents_Update_FloorOutOfRange_Returns422(t *testing.T) {
+	pool := dbtest.NewPool(t)
+	router := tenant.Middleware("condo-test")(resident.NewHandler(resident.NewService(resident.NewPostgresRepository(pool)), middleware.Authenticate(pkgjwt.NewService(handlerSecret))))
+	tok := validToken(t)
+	id := fmt.Sprintf("%v", createResident(t, router, tok, "901", "condo-1")["id"])
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, authReq(http.MethodPut, "/residents/"+id, tok, map[string]any{
+		"unitNumber": "901",
+		"floor":      int64(1) << 40,
+	}))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("expected 422, got %d — %s", rec.Code, rec.Body.String())
+	}
+}
+
 // crudRoundTrip drives create → get → list → update → delete through the HTTP
 // handler backed by the PostgreSQL repository.
 func crudRoundTrip(t *testing.T, router http.Handler, tok, base string, create, update map[string]any, check func(created, updated map[string]any)) {

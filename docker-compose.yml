@@ -77,6 +77,8 @@ services:
       timeout: 3s
       retries: 20
 
+  # No password on purpose: test-only, ephemeral and bound to 127.0.0.1.
+  # Never reuse this service (or its settings) outside local tests.
   redis-test:
     image: redis:7-alpine
     container_name: condoguard-redis-test
