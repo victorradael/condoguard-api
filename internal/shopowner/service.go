@@ -3,9 +3,16 @@ package shopowner
 import (
 	"context"
 	"fmt"
+
+	"github.com/victorradael/condoguard/api/internal/authz"
+	"github.com/victorradael/condoguard/api/pkg/page"
 )
 
 // Service holds the business logic for the shopowner domain.
+//
+// Authorization: admins manage every shop of the condominium; other users
+// only read the shops they own (ownerId). A shop the caller may not see is
+// reported as not found, so its existence does not leak.
 type Service struct {
 	repo Repository
 }
@@ -14,8 +21,11 @@ func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
 
-// Create validates the request, formats and validates the CNPJ, then persists.
+// Create validates the request, formats and validates the CNPJ, then persists. Admins only.
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*ShopOwner, error) {
+	if _, err := authz.RequireAdmin(ctx); err != nil {
+		return nil, err
+	}
 	if req.ShopName == "" {
 		return nil, fmt.Errorf("%w: shopName is required", ErrValidation)
 	}
@@ -41,16 +51,44 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*ShopOwner, er
 	return shop, nil
 }
 
+// GetByID returns the shop if the caller may see it, ErrNotFound otherwise.
 func (s *Service) GetByID(ctx context.Context, id string) (*ShopOwner, error) {
-	return s.repo.FindByID(ctx, id)
+	p, err := authz.FromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	shop, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !p.IsAdmin() && shop.OwnerID != p.UserID {
+		return nil, ErrNotFound
+	}
+	return shop, nil
 }
 
-func (s *Service) List(ctx context.Context) ([]*ShopOwner, error) {
-	return s.repo.FindAll(ctx)
+// List returns one page of the shops the caller may see.
+func (s *Service) List(ctx context.Context, pg page.Params) (page.Result[*ShopOwner], error) {
+	p, err := authz.FromContext(ctx)
+	if err != nil {
+		return page.Result[*ShopOwner]{}, err
+	}
+	owner := p.UserID
+	if p.IsAdmin() {
+		owner = ""
+	}
+	list, total, err := s.repo.FindAll(ctx, owner, pg)
+	if err != nil {
+		return page.Result[*ShopOwner]{}, err
+	}
+	return page.New(list, pg, total), nil
 }
 
-// Update applies shopName and floor changes. CNPJ is immutable after creation.
+// Update applies shopName and floor changes. CNPJ is immutable after creation. Admins only.
 func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*ShopOwner, error) {
+	if _, err := authz.RequireAdmin(ctx); err != nil {
+		return nil, err
+	}
 	shop, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -69,6 +107,15 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*Sh
 	return shop, nil
 }
 
+// Delete removes the shop. Admins only.
 func (s *Service) Delete(ctx context.Context, id string) error {
+	if _, err := authz.RequireAdmin(ctx); err != nil {
+		return err
+	}
 	return s.repo.Delete(ctx, id)
+}
+
+// UnitIDsOwnedBy returns the IDs of the shops owned by userID.
+func (s *Service) UnitIDsOwnedBy(ctx context.Context, userID string) ([]string, error) {
+	return s.repo.IDsByOwner(ctx, userID)
 }

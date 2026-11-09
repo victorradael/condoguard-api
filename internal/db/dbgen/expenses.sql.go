@@ -12,6 +12,40 @@ import (
 	"github.com/google/uuid"
 )
 
+const countExpenses = `-- name: CountExpenses :one
+SELECT count(*)
+FROM expenses
+WHERE condominium_id = $1
+  AND ($2::timestamptz IS NULL OR due_date >= $2::timestamptz)
+  AND ($3::timestamptz IS NULL OR due_date <= $3::timestamptz)
+  AND (NOT $4::boolean
+       OR resident_id = ANY($5::text[])
+       OR shop_owner_id = ANY($6::text[]))
+`
+
+type CountExpensesParams struct {
+	CondominiumID string
+	DueFrom       *time.Time
+	DueTo         *time.Time
+	Restricted    bool
+	ResidentIds   []string
+	ShopOwnerIds  []string
+}
+
+func (q *Queries) CountExpenses(ctx context.Context, arg CountExpensesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countExpenses,
+		arg.CondominiumID,
+		arg.DueFrom,
+		arg.DueTo,
+		arg.Restricted,
+		arg.ResidentIds,
+		arg.ShopOwnerIds,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteExpense = `-- name: DeleteExpense :execrows
 DELETE FROM expenses
 WHERE condominium_id = $1 AND id = $2
@@ -92,17 +126,37 @@ FROM expenses
 WHERE condominium_id = $1
   AND ($2::timestamptz IS NULL OR due_date >= $2::timestamptz)
   AND ($3::timestamptz IS NULL OR due_date <= $3::timestamptz)
+  AND (NOT $4::boolean
+       OR resident_id = ANY($5::text[])
+       OR shop_owner_id = ANY($6::text[]))
 ORDER BY due_date, id
+LIMIT $8 OFFSET $7
 `
 
 type ListExpensesParams struct {
 	CondominiumID string
 	DueFrom       *time.Time
 	DueTo         *time.Time
+	Restricted    bool
+	ResidentIds   []string
+	ShopOwnerIds  []string
+	PageOffset    int32
+	PageLimit     int32
 }
 
+// restricted = false lista tudo (administração); true só as despesas das
+// unidades e lojas informadas (as do próprio usuário).
 func (q *Queries) ListExpenses(ctx context.Context, arg ListExpensesParams) ([]Expense, error) {
-	rows, err := q.db.Query(ctx, listExpenses, arg.CondominiumID, arg.DueFrom, arg.DueTo)
+	rows, err := q.db.Query(ctx, listExpenses,
+		arg.CondominiumID,
+		arg.DueFrom,
+		arg.DueTo,
+		arg.Restricted,
+		arg.ResidentIds,
+		arg.ShopOwnerIds,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

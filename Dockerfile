@@ -1,7 +1,7 @@
 # -- Build Stage --
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26.10-alpine3.24@sha256:87c65a688975c0b1d4585d204874c45ca78354670e3a5f11368c5a492303d696 AS builder
 
-WORKDIR /app
+WORKDIR /src
 
 # Copiar arquivos de dependência
 COPY go.mod go.sum ./
@@ -10,22 +10,28 @@ RUN go mod download
 # Copiar o restante do código
 COPY . .
 
-# Compilar o binário
-RUN CGO_ENABLED=0 GOOS=linux go build -o bin/condoguard-api ./cmd/server
+# Compilar os binários: servidor, migrações e criação do primeiro admin
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/condoguard-api ./cmd/server && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/condoguard-migrate ./cmd/migrate && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/condoguard-createadmin ./cmd/createadmin
 
 # -- Final Stage --
-FROM alpine:latest
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 
-# Instalar certificados CA (necessário para conexões TLS externas, se houver)
-RUN apk --no-cache add ca-certificates
+# Certificados CA (TLS para PostgreSQL/Redis fora do host) e usuário sem privilégios
+RUN apk --no-cache add ca-certificates && \
+    addgroup -S -g 10001 condoguard && \
+    adduser -S -D -H -u 10001 -G condoguard condoguard
 
-WORKDIR /root/
+COPY --from=builder /out/ /usr/local/bin/
 
-# Copiar o binário do estágio de build
-COPY --from=builder /app/bin/condoguard-api .
+USER 10001:10001
 
-# Expor a porta configurada no app.go (default 8080)
+# Expor a porta configurada (default 8080)
 EXPOSE 8080
 
-# Comando para rodar a aplicação
-CMD ["./condoguard-api"]
+HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=3 \
+    CMD wget -q -O /dev/null "http://127.0.0.1:${PORT:-8080}/health" || exit 1
+
+# O primeiro admin: docker compose exec api condoguard-createadmin
+ENTRYPOINT ["condoguard-api"]

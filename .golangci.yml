@@ -19,6 +19,8 @@ linters:
       # The domain vocabulary is Portuguese ("Momento", ...).
       ignore-rules:
         - momento
+        - validade
+        - autor
   exclusions:
     generated: lax
     presets:

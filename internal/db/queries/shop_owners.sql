@@ -8,11 +8,25 @@ SELECT *
 FROM shop_owners
 WHERE condominium_id = @condominium_id AND id = @id;
 
+-- owner_id NULL lista todas as lojas do condomínio (administração).
 -- name: ListShopOwners :many
 SELECT *
 FROM shop_owners
 WHERE condominium_id = @condominium_id
-ORDER BY created_at, id;
+  AND (sqlc.narg(owner_id)::text IS NULL OR owner_id = sqlc.narg(owner_id)::text)
+ORDER BY created_at, id
+LIMIT @page_limit OFFSET @page_offset;
+
+-- name: CountShopOwners :one
+SELECT count(*)
+FROM shop_owners
+WHERE condominium_id = @condominium_id
+  AND (sqlc.narg(owner_id)::text IS NULL OR owner_id = sqlc.narg(owner_id)::text);
+
+-- name: ListShopOwnerIDsByOwner :many
+SELECT id
+FROM shop_owners
+WHERE condominium_id = @condominium_id AND owner_id = @owner_id;
 
 -- name: UpdateShopOwner :execrows
 UPDATE shop_owners

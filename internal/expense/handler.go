@@ -5,10 +5,13 @@ import (
 	"errors"
 	"net/http"
 	"time"
+
+	"github.com/victorradael/condoguard/api/internal/authz"
+	"github.com/victorradael/condoguard/api/pkg/page"
 )
 
 // NewHandler wires the expense CRUD routes behind the provided auth middleware.
-// Any authenticated user may access these routes.
+// Admins manage all expenses; other users only read their units' (see Service).
 func NewHandler(svc *Service, authMW func(http.Handler) http.Handler) http.Handler {
 	h := &handler{svc: svc}
 
@@ -26,30 +29,37 @@ type handler struct {
 	svc *Service
 }
 
-// list handles GET /expenses with optional ?from=<RFC3339>&to=<RFC3339> query params.
+// list handles GET /expenses with optional ?from=<RFC3339>&to=<RFC3339> query
+// params and pagination (?page=&pageSize=).
 func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 	var f Filter
 
+	p, err := page.FromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	if raw := r.URL.Query().Get("from"); raw != "" {
-		t, err := time.Parse(time.RFC3339, raw)
-		if err != nil {
+		t, perr := time.Parse(time.RFC3339, raw)
+		if perr != nil {
 			writeError(w, http.StatusBadRequest, "invalid 'from' date: use RFC3339 format (e.g. 2026-01-01T00:00:00Z)")
 			return
 		}
 		f.From = &t
 	}
 	if raw := r.URL.Query().Get("to"); raw != "" {
-		t, err := time.Parse(time.RFC3339, raw)
-		if err != nil {
+		t, perr := time.Parse(time.RFC3339, raw)
+		if perr != nil {
 			writeError(w, http.StatusBadRequest, "invalid 'to' date: use RFC3339 format")
 			return
 		}
 		f.To = &t
 	}
 
-	list, err := h.svc.List(r.Context(), f)
+	list, err := h.svc.List(r.Context(), f, p)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
@@ -93,7 +103,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, e)
@@ -135,7 +145,7 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, ErrValidation):
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 		default:
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeServiceError(w, err)
 		}
 		return
 	}
@@ -150,7 +160,7 @@ func (h *handler) getByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "expense not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, e)
@@ -163,10 +173,19 @@ func (h *handler) delete(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "expense not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeServiceError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeServiceError answers 401/403 for authorization errors and 500 otherwise.
+func writeServiceError(w http.ResponseWriter, err error) {
+	if status, msg, ok := authz.Status(err); ok {
+		writeError(w, status, msg)
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "internal error")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

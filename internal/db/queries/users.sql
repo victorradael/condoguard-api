@@ -1,4 +1,5 @@
 -- Todas as consultas recebem condominium_id: nenhuma leitura ou escrita sem tenant.
+-- O e-mail chega já normalizado (minúsculo, sem espaços) e é único na base toda.
 
 -- name: InsertUser :one
 INSERT INTO users (condominium_id, username, email, password_hash, roles)
@@ -10,13 +11,6 @@ SELECT *
 FROM users
 WHERE condominium_id = @condominium_id AND id = @id;
 
--- name: GetUserByUsername :one
-SELECT *
-FROM users
-WHERE condominium_id = @condominium_id AND username = @username
-ORDER BY created_at, id
-LIMIT 1;
-
 -- name: GetUserByEmail :one
 SELECT *
 FROM users
@@ -26,7 +20,13 @@ WHERE condominium_id = @condominium_id AND email = @email;
 SELECT *
 FROM users
 WHERE condominium_id = @condominium_id
-ORDER BY created_at, id;
+ORDER BY created_at, id
+LIMIT @page_limit OFFSET @page_offset;
+
+-- name: CountUsers :one
+SELECT count(*)
+FROM users
+WHERE condominium_id = @condominium_id;
 
 -- name: UpdateUser :execrows
 UPDATE users

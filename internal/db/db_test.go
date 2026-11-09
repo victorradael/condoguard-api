@@ -8,7 +8,7 @@ import (
 	"github.com/victorradael/condoguard/api/internal/db/dbtest"
 )
 
-var tables = []string{"users", "residents", "shop_owners", "expenses", "notifications"}
+var tables = []string{"users", "residents", "shop_owners", "expenses", "notifications", "refresh_tokens", "notification_reads"}
 
 // goose up → down to zero → up again must work on an empty database.
 func TestMigrations_UpDownUp_FromScratch(t *testing.T) {

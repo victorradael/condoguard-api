@@ -8,6 +8,7 @@ import (
 	"github.com/victorradael/condoguard/api/internal/db"
 	"github.com/victorradael/condoguard/api/internal/db/dbgen"
 	"github.com/victorradael/condoguard/api/internal/tenant"
+	"github.com/victorradael/condoguard/api/pkg/page"
 )
 
 type postgresRepository struct {
@@ -61,20 +62,24 @@ func (r *postgresRepository) FindByID(ctx context.Context, id string) (*User, er
 	return fromRow(row), nil
 }
 
-func (r *postgresRepository) FindAll(ctx context.Context) ([]*User, error) {
+func (r *postgresRepository) FindAll(ctx context.Context, p page.Params) ([]*User, int64, error) {
 	condoID, err := tenant.CondominiumID(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	rows, err := r.q.ListUsers(ctx, condoID)
+	rows, err := r.q.ListUsers(ctx, dbgen.ListUsersParams{CondominiumID: condoID, PageLimit: p.Limit(), PageOffset: p.Offset()})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
+	}
+	total, err := r.q.CountUsers(ctx, condoID)
+	if err != nil {
+		return nil, 0, err
 	}
 	list := make([]*User, 0, len(rows))
 	for _, row := range rows {
 		list = append(list, fromRow(row))
 	}
-	return list, nil
+	return list, total, nil
 }
 
 func (r *postgresRepository) Update(ctx context.Context, u *User) error {
@@ -123,6 +128,18 @@ func (r *postgresRepository) Delete(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (r *postgresRepository) RevokeSessions(ctx context.Context, id string) error {
+	condoID, err := tenant.CondominiumID(ctx)
+	if err != nil {
+		return err
+	}
+	uid, ok := db.ParseID(id)
+	if !ok {
+		return ErrNotFound
+	}
+	return r.q.RevokeUserRefreshTokens(ctx, dbgen.RevokeUserRefreshTokensParams{CondominiumID: condoID, UserID: uid})
 }
 
 func fromRow(row dbgen.User) *User {

@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"expvar"
 	"fmt"
 	"log/slog"
@@ -16,6 +17,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/victorradael/condoguard/api/internal/auth"
+	"github.com/victorradael/condoguard/api/internal/authz"
 	"github.com/victorradael/condoguard/api/internal/db"
 	"github.com/victorradael/condoguard/api/internal/expense"
 	"github.com/victorradael/condoguard/api/internal/middleware"
@@ -31,49 +33,95 @@ import (
 
 // Config holds the infrastructure settings read from the environment.
 type Config struct {
-	DatabaseURL        string        // DATABASE_URL; empty = in-memory repositories (dev/tests only)
-	MigrateOnStart     bool          // DB_MIGRATE_ON_START (default true)
-	RedisURL           string        // REDIS_URL; empty = in-memory login limiter (single instance)
-	CondominiumID      string        // DEFAULT_CONDOMINIUM_ID (default "default") — tenant until 1b
-	LoginMaxAttempts   int           // LOGIN_MAX_ATTEMPTS (default 5)
-	LoginLockoutWindow time.Duration // LOGIN_LOCKOUT_WINDOW (default 15m)
-	JWTSecret          string        // JWT_SECRET_KEY
+	DatabaseURL           string        // DATABASE_URL; empty = in-memory repositories (dev/tests only)
+	MigrateOnStart        bool          // DB_MIGRATE_ON_START (default true)
+	RedisURL              string        // REDIS_URL; empty = in-memory login limiter (single instance)
+	CondominiumID         string        // DEFAULT_CONDOMINIUM_ID (default "default") — tenant of sign-up and login until 1b
+	LoginMaxAttempts      int           // LOGIN_MAX_ATTEMPTS per IP + e-mail (default 5)
+	LoginMaxAttemptsPerIP int           // LOGIN_MAX_ATTEMPTS_PER_IP across e-mails (default 50)
+	LoginLockoutWindow    time.Duration // LOGIN_LOCKOUT_WINDOW (default 15m)
+	RegisterMaxPerIP      int           // REGISTER_MAX_PER_IP sign-ups per IP and window (default 10; 0 in Config disables)
+	RegisterWindow        time.Duration // REGISTER_WINDOW (default 1h)
+	JWTSecret             string        // JWT_SECRET_KEY (required): Base64 of >= 32 random bytes
+	AccessTokenTTL        time.Duration // ACCESS_TOKEN_TTL (default 15m)
+	RefreshTokenTTL       time.Duration // REFRESH_TOKEN_TTL (default 720h)
+	CORSAllowedOrigins    []string      // CORS_ALLOWED_ORIGINS (default http://localhost:3000); "*" is rejected
+	CookieSecure          bool          // COOKIE_SECURE (default true); false only for plain-HTTP local dev
+	CookieDomain          string        // COOKIE_DOMAIN (default: API host only)
+	MetricsToken          string        // METRICS_TOKEN; empty disables /metrics
 }
 
 // ConfigFromEnv reads Config from environment variables, applying defaults.
+// It fails when a required setting is missing or unsafe (e.g. a weak JWT
+// secret or a CORS wildcard): the API must not start insecurely.
 func ConfigFromEnv() (Config, error) {
 	cfg := Config{
-		DatabaseURL:        os.Getenv("DATABASE_URL"),
-		MigrateOnStart:     true,
-		RedisURL:           os.Getenv("REDIS_URL"),
-		CondominiumID:      os.Getenv("DEFAULT_CONDOMINIUM_ID"),
-		LoginMaxAttempts:   5,
-		LoginLockoutWindow: 15 * time.Minute,
-		JWTSecret:          os.Getenv("JWT_SECRET_KEY"),
+		DatabaseURL:           os.Getenv("DATABASE_URL"),
+		MigrateOnStart:        true,
+		RedisURL:              os.Getenv("REDIS_URL"),
+		CondominiumID:         os.Getenv("DEFAULT_CONDOMINIUM_ID"),
+		LoginMaxAttempts:      5,
+		LoginMaxAttemptsPerIP: 50,
+		LoginLockoutWindow:    15 * time.Minute,
+		RegisterMaxPerIP:      10,
+		RegisterWindow:        time.Hour,
+		JWTSecret:             os.Getenv("JWT_SECRET_KEY"),
+		AccessTokenTTL:        pkgjwt.DefaultExpiry,
+		RefreshTokenTTL:       auth.DefaultRefreshTTL,
+		CookieSecure:          true,
+		CookieDomain:          os.Getenv("COOKIE_DOMAIN"),
+		MetricsToken:          os.Getenv("METRICS_TOKEN"),
 	}
 	if cfg.CondominiumID == "" {
 		cfg.CondominiumID = "default"
 	}
-	if v := os.Getenv("DB_MIGRATE_ON_START"); v != "" {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			return cfg, fmt.Errorf("DB_MIGRATE_ON_START: %w", err)
-		}
-		cfg.MigrateOnStart = b
+	if _, err := pkgjwt.DecodeSecret(cfg.JWTSecret); err != nil {
+		return cfg, fmt.Errorf("JWT_SECRET_KEY: %w", err)
 	}
-	if v := os.Getenv("LOGIN_MAX_ATTEMPTS"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			return cfg, fmt.Errorf("LOGIN_MAX_ATTEMPTS must be a positive integer")
-		}
-		cfg.LoginMaxAttempts = n
+	if cfg.MetricsToken != "" && len(cfg.MetricsToken) < 32 {
+		return cfg, fmt.Errorf("METRICS_TOKEN must have at least 32 characters (or be empty to disable /metrics)")
 	}
-	if v := os.Getenv("LOGIN_LOCKOUT_WINDOW"); v != "" {
-		d, err := time.ParseDuration(v)
-		if err != nil || d <= 0 {
-			return cfg, fmt.Errorf("LOGIN_LOCKOUT_WINDOW must be a positive duration (e.g. 15m)")
+	origins := os.Getenv("CORS_ALLOWED_ORIGINS")
+	if origins == "" {
+		origins = "http://localhost:3000"
+	}
+	var err error
+	if cfg.CORSAllowedOrigins, err = middleware.ParseOrigins(origins); err != nil {
+		return cfg, fmt.Errorf("CORS_ALLOWED_ORIGINS: %w", err)
+	}
+	for _, b := range []struct {
+		env string
+		dst *bool
+	}{{"DB_MIGRATE_ON_START", &cfg.MigrateOnStart}, {"COOKIE_SECURE", &cfg.CookieSecure}} {
+		if v := os.Getenv(b.env); v != "" {
+			if *b.dst, err = strconv.ParseBool(v); err != nil {
+				return cfg, fmt.Errorf("%s: %w", b.env, err)
+			}
 		}
-		cfg.LoginLockoutWindow = d
+	}
+	for _, n := range []struct {
+		env string
+		dst *int
+	}{{"LOGIN_MAX_ATTEMPTS", &cfg.LoginMaxAttempts}, {"LOGIN_MAX_ATTEMPTS_PER_IP", &cfg.LoginMaxAttemptsPerIP}, {"REGISTER_MAX_PER_IP", &cfg.RegisterMaxPerIP}} {
+		if v := os.Getenv(n.env); v != "" {
+			i, err := strconv.Atoi(v)
+			if err != nil || i < 1 {
+				return cfg, fmt.Errorf("%s must be a positive integer", n.env)
+			}
+			*n.dst = i
+		}
+	}
+	for _, d := range []struct {
+		env string
+		dst *time.Duration
+	}{{"LOGIN_LOCKOUT_WINDOW", &cfg.LoginLockoutWindow}, {"REGISTER_WINDOW", &cfg.RegisterWindow}, {"ACCESS_TOKEN_TTL", &cfg.AccessTokenTTL}, {"REFRESH_TOKEN_TTL", &cfg.RefreshTokenTTL}} {
+		if v := os.Getenv(d.env); v != "" {
+			t, err := time.ParseDuration(v)
+			if err != nil || t <= 0 {
+				return cfg, fmt.Errorf("%s must be a positive duration (e.g. 15m)", d.env)
+			}
+			*d.dst = t
+		}
 	}
 	return cfg, nil
 }
@@ -101,6 +149,18 @@ func (a *App) Close() {
 func New(ctx context.Context, cfg Config, logger *slog.Logger, metrics *middleware.Metrics) (*App, error) {
 	a := &App{}
 
+	ttl := cfg.AccessTokenTTL
+	if ttl <= 0 {
+		ttl = pkgjwt.DefaultExpiry
+	}
+	jwtSvc, err := pkgjwt.NewServiceWithExpiry(cfg.JWTSecret, ttl)
+	if err != nil {
+		return nil, fmt.Errorf("JWT_SECRET_KEY: %w", err)
+	}
+	if cfg.LoginMaxAttempts < 1 || cfg.LoginLockoutWindow <= 0 {
+		return nil, fmt.Errorf("login limit: LoginMaxAttempts and LoginLockoutWindow must be positive")
+	}
+
 	if cfg.DatabaseURL != "" {
 		pool, err := db.NewPool(ctx, cfg.DatabaseURL)
 		if err != nil {
@@ -117,12 +177,14 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger, metrics *middlewa
 		slog.Warn("DATABASE_URL not set — using in-memory repositories (not for production)")
 	}
 
-	var limiter ratelimit.Limiter
+	var limiter, ipLimiter, registerLimiter ratelimit.Limiter
+	registerOn := cfg.RegisterMaxPerIP > 0 && cfg.RegisterWindow > 0
 	if cfg.RedisURL != "" {
 		opts, err := redis.ParseURL(cfg.RedisURL)
 		if err != nil {
+			// The parse error quotes the URL, password included: keep it out of the log.
 			a.Close()
-			return nil, fmt.Errorf("REDIS_URL: %w", err)
+			return nil, errors.New("REDIS_URL: invalid URL")
 		}
 		a.redis = redis.NewClient(opts)
 		if err := a.redis.Ping(ctx).Err(); err != nil {
@@ -130,12 +192,24 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger, metrics *middlewa
 			return nil, fmt.Errorf("redis ping: %w", err)
 		}
 		limiter = ratelimit.NewRedis(a.redis, "condoguard:login:", cfg.LoginMaxAttempts, cfg.LoginLockoutWindow)
+		if cfg.LoginMaxAttemptsPerIP > 0 {
+			ipLimiter = ratelimit.NewRedis(a.redis, "condoguard:login-ip:", cfg.LoginMaxAttemptsPerIP, cfg.LoginLockoutWindow)
+		}
+		if registerOn {
+			registerLimiter = ratelimit.NewRedis(a.redis, "condoguard:register-ip:", cfg.RegisterMaxPerIP, cfg.RegisterWindow)
+		}
 	} else {
 		slog.Warn("REDIS_URL not set — login attempt limit kept in process memory (single instance only)")
 		limiter = ratelimit.NewMemory(cfg.LoginMaxAttempts, cfg.LoginLockoutWindow)
+		if cfg.LoginMaxAttemptsPerIP > 0 {
+			ipLimiter = ratelimit.NewMemory(cfg.LoginMaxAttemptsPerIP, cfg.LoginLockoutWindow)
+		}
+		if registerOn {
+			registerLimiter = ratelimit.NewMemory(cfg.RegisterMaxPerIP, cfg.RegisterWindow)
+		}
 	}
 
-	a.Handler = newHandler(cfg, a.pool, limiter, logger, metrics)
+	a.Handler = newHandler(cfg, jwtSvc, a.pool, limiters{login: limiter, loginIP: ipLimiter, register: registerLimiter}, logger, metrics)
 	return a, nil
 }
 
@@ -157,31 +231,33 @@ func NewRouter(logger *slog.Logger, metrics *middleware.Metrics) http.Handler {
 }
 
 // newHandler wires all domain routes and the global middleware stack:
-// CORS → RequestID → Logging → Metrics → Tenant → mux.
-func newHandler(cfg Config, pool *pgxpool.Pool, limiter ratelimit.Limiter, logger *slog.Logger, metrics *middleware.Metrics) http.Handler {
-	mux := http.NewServeMux()
+// SecurityHeaders → CORS → RequestID → Logging → Metrics → MaxBody → Tenant → mux.
+// limiters are the request limiters of the public auth routes; nil = off.
+type limiters struct {
+	login, loginIP, register ratelimit.Limiter
+}
 
-	// ── Health ─────────────────────────────────────────────────────────────────
+func newHandler(cfg Config, jwtSvc *pkgjwt.Service, pool *pgxpool.Pool, lim limiters, logger *slog.Logger, metrics *middleware.Metrics) http.Handler {
+	mux := http.NewServeMux()
+	authMW := middleware.Authenticate(jwtSvc, cfg.CORSAllowedOrigins...)
+	adminOnly := func(h http.Handler) http.Handler {
+		return authMW(middleware.RequireRole(authz.RoleAdmin)(h))
+	}
+
+	// ── Health (public) ────────────────────────────────────────────────────────
 	mux.HandleFunc("GET /health", handleHealth)
 
-	// ── Metrics (expvar) ───────────────────────────────────────────────────────
-	mux.Handle("GET /metrics", expvar.Handler())
+	// ── Metrics (expvar): METRICS_TOKEN bearer; disabled when unset ───────────
+	mux.Handle("GET /metrics", middleware.StaticToken(cfg.MetricsToken)(expvar.Handler()))
 
-	// ── OpenAPI spec + Swagger UI ──────────────────────────────────────────────
-	mux.Handle("GET /openapi.json", openapi.Handler())
-	mux.Handle("GET /docs", openapi.UIHandler())
+	// ── OpenAPI spec + Swagger UI (admins) ─────────────────────────────────────
+	mux.Handle("GET /openapi.json", adminOnly(openapi.Handler()))
+	mux.Handle("GET /docs", adminOnly(openapi.UIHandler()))
 
 	// ── Dependencies ───────────────────────────────────────────────────────────
-	jwtSecret := cfg.JWTSecret
-	if jwtSecret == "" {
-		slog.Warn("JWT_SECRET_KEY not set — using insecure placeholder (not for production)")
-		jwtSecret = "Y2hhbmdlLW1lLWluLXByb2R1Y3Rpb24="
-	}
-	jwtSvc := pkgjwt.NewService(jwtSecret)
-	authMW := middleware.Authenticate(jwtSvc)
-
 	var (
 		authRepo     auth.Repository
+		tokenStore   auth.TokenStore
 		userRepo     user.Repository
 		residentRepo resident.Repository
 		shopRepo     shopowner.Repository
@@ -190,6 +266,7 @@ func newHandler(cfg Config, pool *pgxpool.Pool, limiter ratelimit.Limiter, logge
 	)
 	if pool != nil {
 		authRepo = auth.NewPostgresRepository(pool)
+		tokenStore = auth.NewPostgresTokenStore(pool)
 		userRepo = user.NewPostgresRepository(pool)
 		residentRepo = resident.NewPostgresRepository(pool)
 		shopRepo = shopowner.NewPostgresRepository(pool)
@@ -197,6 +274,7 @@ func newHandler(cfg Config, pool *pgxpool.Pool, limiter ratelimit.Limiter, logge
 		notifRepo = notification.NewPostgresRepository(pool)
 	} else {
 		authRepo = auth.NewInMemoryRepository()
+		tokenStore = auth.NewInMemoryTokenStore()
 		userRepo = user.NewInMemoryRepository()
 		residentRepo = resident.NewInMemoryRepository()
 		shopRepo = shopowner.NewInMemoryRepository()
@@ -204,38 +282,66 @@ func newHandler(cfg Config, pool *pgxpool.Pool, limiter ratelimit.Limiter, logge
 		notifRepo = notification.NewInMemoryRepository()
 	}
 
-	// ── Auth (public; login limited per IP + username) ─────────────────────────
-	authHandler := auth.NewHandler(auth.NewService(authRepo, jwtSvc))
-	mux.Handle("POST /auth/login", middleware.LoginLimit(limiter)(authHandler))
+	residentSvc := resident.NewService(residentRepo)
+	shopSvc := shopowner.NewService(shopRepo)
+	units := authz.UnitResolverFunc(func(ctx context.Context, userID string) (authz.Units, error) {
+		rids, err := residentSvc.UnitIDsOwnedBy(ctx, userID)
+		if err != nil {
+			return authz.Units{}, err
+		}
+		sids, err := shopSvc.UnitIDsOwnedBy(ctx, userID)
+		if err != nil {
+			return authz.Units{}, err
+		}
+		return authz.Units{ResidentIDs: rids, ShopOwnerIDs: sids}, nil
+	})
+
+	// ── Auth (public; login limited per IP + e-mail and per IP, sign-up per IP) ─
+	authHandler := auth.NewHandler(
+		auth.NewService(authRepo, tokenStore, jwtSvc, cfg.RefreshTokenTTL),
+		auth.CookieOptions{Secure: cfg.CookieSecure, Domain: cfg.CookieDomain, AllowedOrigins: cfg.CORSAllowedOrigins},
+	)
+	mux.Handle("POST /auth/login", middleware.LoginLimit(lim.login, lim.loginIP)(authHandler))
+	mux.Handle("POST /auth/register", middleware.IPLimit(lim.register, "too many sign-ups, try again later")(authHandler))
 	mux.Handle("/auth/", authHandler)
 
-	// ── Users (ROLE_ADMIN) ─────────────────────────────────────────────────────
-	mux.Handle("/users", user.NewHandler(user.NewService(userRepo), authMW))
-	mux.Handle("/users/", user.NewHandler(user.NewService(userRepo), authMW))
+	// ── Users (/users/me: any user; the rest: ROLE_ADMIN) ──────────────────────
+	userHandler := user.NewHandler(user.NewService(userRepo), authMW)
+	mux.Handle("/users", userHandler)
+	mux.Handle("/users/", userHandler)
 
-	// ── Residents ─────────────────────────────────────────────────────────────
-	mux.Handle("/residents", resident.NewHandler(resident.NewService(residentRepo), authMW))
-	mux.Handle("/residents/", resident.NewHandler(resident.NewService(residentRepo), authMW))
+	// ── Residents (units) ──────────────────────────────────────────────────────
+	residentHandler := resident.NewHandler(residentSvc, authMW)
+	mux.Handle("/residents", residentHandler)
+	mux.Handle("/residents/", residentHandler)
 
-	// ── ShopOwners ────────────────────────────────────────────────────────────
-	mux.Handle("/shopOwners", shopowner.NewHandler(shopowner.NewService(shopRepo), authMW))
-	mux.Handle("/shopOwners/", shopowner.NewHandler(shopowner.NewService(shopRepo), authMW))
+	// ── ShopOwners (/shop-owners; /shopOwners kept as an alias) ───────────────
+	shopHandler := shopowner.NewHandler(shopSvc, authMW)
+	for _, p := range shopowner.Prefixes {
+		mux.Handle(p, shopHandler)
+		mux.Handle(p+"/", shopHandler)
+	}
 
 	// ── Expenses ──────────────────────────────────────────────────────────────
-	mux.Handle("/expenses", expense.NewHandler(expense.NewService(expenseRepo), authMW))
-	mux.Handle("/expenses/", expense.NewHandler(expense.NewService(expenseRepo), authMW))
+	expenseHandler := expense.NewHandler(expense.NewService(expenseRepo, units), authMW)
+	mux.Handle("/expenses", expenseHandler)
+	mux.Handle("/expenses/", expenseHandler)
 
 	// ── Notifications ─────────────────────────────────────────────────────────
-	mux.Handle("/notifications", notification.NewHandler(notification.NewService(notifRepo), authMW))
-	mux.Handle("/notifications/", notification.NewHandler(notification.NewService(notifRepo), authMW))
+	notifHandler := notification.NewHandler(notification.NewService(notifRepo, units), authMW)
+	mux.Handle("/notifications", notifHandler)
+	mux.Handle("/notifications/", notifHandler)
 
 	// ── Global middleware stack (outermost = first executed) ──────────────────
-	// Order: CORS → RequestID → Logging → Metrics → Tenant → mux
-	return middleware.CORS(
-		middleware.RequestID(
-			middleware.Logging(logger)(
-				metrics.Middleware(
-					tenant.Middleware(cfg.CondominiumID)(mux),
+	return middleware.SecurityHeaders(
+		middleware.CORS(cfg.CORSAllowedOrigins)(
+			middleware.RequestID(
+				middleware.Logging(logger)(
+					metrics.Middleware(
+						middleware.MaxBody(middleware.DefaultMaxBodyBytes)(
+							tenant.Middleware(cfg.CondominiumID)(mux),
+						),
+					),
 				),
 			),
 		),

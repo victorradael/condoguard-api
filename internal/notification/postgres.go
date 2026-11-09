@@ -4,11 +4,14 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/victorradael/condoguard/api/internal/authz"
 	"github.com/victorradael/condoguard/api/internal/db"
 	"github.com/victorradael/condoguard/api/internal/db/dbgen"
 	"github.com/victorradael/condoguard/api/internal/tenant"
+	"github.com/victorradael/condoguard/api/pkg/page"
 )
 
 type postgresRepository struct {
@@ -33,8 +36,6 @@ func (r *postgresRepository) Save(ctx context.Context, n *Notification) error {
 		Message:       n.Message,
 		CreatedByID:   n.CreatedByID,
 		CreatedAt:     n.CreatedAt,
-		Read:          n.Read,
-		ReadAt:        n.ReadAt,
 		ResidentIds:   n.ResidentIDs,
 		ShopOwnerIds:  n.ShopOwnerIDs,
 	})
@@ -45,7 +46,7 @@ func (r *postgresRepository) Save(ctx context.Context, n *Notification) error {
 	return nil
 }
 
-func (r *postgresRepository) FindByID(ctx context.Context, id string) (*Notification, error) {
+func (r *postgresRepository) FindByID(ctx context.Context, id, readerID string) (*Notification, error) {
 	condoID, err := tenant.CondominiumID(ctx)
 	if err != nil {
 		return nil, err
@@ -54,31 +55,66 @@ func (r *postgresRepository) FindByID(ctx context.Context, id string) (*Notifica
 	if !ok {
 		return nil, ErrNotFound
 	}
-	row, err := r.q.GetNotificationByID(ctx, dbgen.GetNotificationByIDParams{CondominiumID: condoID, ID: uid})
+	row, err := r.q.GetNotificationByID(ctx, dbgen.GetNotificationByIDParams{CondominiumID: condoID, ID: uid, ReaderID: optionalID(readerID)})
 	if db.IsNoRows(err) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	return fromRow(row), nil
+	return fromRow(dbgen.ListNotificationsRow(row)), nil
 }
 
-// FindAll lists notifications, newest first.
-func (r *postgresRepository) FindAll(ctx context.Context) ([]*Notification, error) {
+// FindAll lists the notifications visible in scope, newest first.
+func (r *postgresRepository) FindAll(ctx context.Context, scope authz.Scope, readerID string, p page.Params) ([]*Notification, int64, error) {
 	condoID, err := tenant.CondominiumID(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	rows, err := r.q.ListNotifications(ctx, condoID)
+	restricted := !scope.All
+	residentIDs, shopIDs := nonNil(scope.Units.ResidentIDs), nonNil(scope.Units.ShopOwnerIDs)
+	rows, err := r.q.ListNotifications(ctx, dbgen.ListNotificationsParams{
+		CondominiumID: condoID, ReaderID: optionalID(readerID),
+		Restricted: restricted, ResidentIds: residentIDs, ShopOwnerIds: shopIDs,
+		PageLimit: p.Limit(), PageOffset: p.Offset(),
+	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
+	}
+	total, err := r.q.CountNotifications(ctx, dbgen.CountNotificationsParams{
+		CondominiumID: condoID, Restricted: restricted, ResidentIds: residentIDs, ShopOwnerIds: shopIDs,
+	})
+	if err != nil {
+		return nil, 0, err
 	}
 	list := make([]*Notification, 0, len(rows))
 	for _, row := range rows {
 		list = append(list, fromRow(row))
 	}
-	return list, nil
+	return list, total, nil
+}
+
+func (r *postgresRepository) MarkRead(ctx context.Context, id, userID string) (time.Time, error) {
+	condoID, err := tenant.CondominiumID(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	nid, ok := db.ParseID(id)
+	if !ok {
+		return time.Time{}, ErrNotFound
+	}
+	uid, ok := db.ParseID(userID)
+	if !ok {
+		return time.Time{}, ErrNotFound
+	}
+	at, err := r.q.MarkNotificationRead(ctx, dbgen.MarkNotificationReadParams{CondominiumID: condoID, NotificationID: nid, UserID: uid})
+	if db.IsNoRows(err) {
+		return time.Time{}, ErrNotFound
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return at.UTC(), nil
 }
 
 func (r *postgresRepository) Update(ctx context.Context, n *Notification) error {
@@ -94,9 +130,6 @@ func (r *postgresRepository) Update(ctx context.Context, n *Notification) error 
 		CondominiumID: condoID,
 		ID:            uid,
 		Message:       n.Message,
-		CreatedByID:   n.CreatedByID,
-		Read:          n.Read,
-		ReadAt:        n.ReadAt,
 		ResidentIds:   nonNil(n.ResidentIDs),
 		ShopOwnerIds:  nonNil(n.ShopOwnerIDs),
 	})
@@ -128,13 +161,13 @@ func (r *postgresRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func fromRow(row dbgen.Notification) *Notification {
+func fromRow(row dbgen.ListNotificationsRow) *Notification {
 	return &Notification{
 		ID:           row.ID.String(),
 		Message:      row.Message,
 		CreatedByID:  row.CreatedByID,
 		CreatedAt:    row.CreatedAt.UTC(),
-		Read:         row.Read,
+		Read:         row.ReadAt != nil,
 		ReadAt:       utcPtr(row.ReadAt),
 		ResidentIDs:  nonNil(row.ResidentIds),
 		ShopOwnerIDs: nonNil(row.ShopOwnerIds),
@@ -147,6 +180,14 @@ func utcPtr(t *time.Time) *time.Time {
 	}
 	u := t.UTC()
 	return &u
+}
+
+// optionalID is nil for anything that is not a user UUID (no read state).
+func optionalID(id string) *uuid.UUID {
+	if u, ok := db.ParseID(id); ok {
+		return &u
+	}
+	return nil
 }
 
 func nonNil(s []string) []string {

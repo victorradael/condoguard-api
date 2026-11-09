@@ -7,9 +7,16 @@ func NewSpec() *Spec {
 	return &Spec{
 		OpenAPI: "3.1.0",
 		Info: Info{
-			Title:       "CondoGuard API",
-			Description: "REST API para gestão financeira e administrativa de condomínios.",
-			Version:     "1.0.0",
+			Title: "CondoGuard API",
+			Description: "REST API para gestão financeira e administrativa de condomínios.\n\n" +
+				"**Autenticação.** O app envia o access token em `Authorization: Bearer`; o web usa os cookies " +
+				"httpOnly `cg_access`/`cg_refresh` (login com `useCookies: true`). Com cookie, requisições que " +
+				"alteram dados precisam vir de uma origem permitida (cabeçalho `Origin`).\n\n" +
+				"**Papéis.** `ROLE_ADMIN` administra o condomínio e vê tudo nele. `ROLE_USER` (morador/lojista) " +
+				"só lê os registros das próprias unidades e lojas; o que ele não pode ver responde 404. " +
+				"Nada de outro condomínio é visível.\n\n" +
+				"**Listas** são paginadas: `?page=1&pageSize=20` (máx. 100) → `{items, page, pageSize, total}`.",
+			Version: "1.1.0",
 			License: &License{
 				Name: "GNU GPL v3.0",
 				URL:  "https://www.gnu.org/licenses/gpl-3.0.html",
@@ -19,13 +26,13 @@ func NewSpec() *Spec {
 			{URL: "/", Description: "Current server"},
 		},
 		Tags: []Tag{
-			{Name: "Auth", Description: "Registro e autenticação"},
-			{Name: "Users", Description: "Gestão de usuários (ROLE_ADMIN)"},
-			{Name: "Residents", Description: "Gestão de residências"},
-			{Name: "ShopOwners", Description: "Gestão de lojas"},
-			{Name: "Expenses", Description: "Gestão de despesas"},
-			{Name: "Notifications", Description: "Gestão de notificações"},
-			{Name: "System", Description: "Health check e métricas"},
+			{Name: "Auth", Description: "Cadastro, login e sessão"},
+			{Name: "Users", Description: "Gestão de usuários (ROLE_ADMIN), exceto /users/me"},
+			{Name: "Residents", Description: "Unidades residenciais"},
+			{Name: "ShopOwners", Description: "Lojas"},
+			{Name: "Expenses", Description: "Despesas"},
+			{Name: "Notifications", Description: "Notificações"},
+			{Name: "System", Description: "Health check"},
 		},
 		Components: buildComponents(),
 		Paths:      buildPaths(),
@@ -41,7 +48,13 @@ func buildComponents() Components {
 				Type:         "http",
 				Scheme:       "bearer",
 				BearerFormat: "JWT",
-				Description:  "Token JWT obtido via POST /auth/login. Expira em 10 horas.",
+				Description:  "Access token (JWT) de POST /auth/login ou /auth/refresh. Expira em 15 minutos.",
+			},
+			"cookieAuth": {
+				Type:        "apiKey",
+				In:          "cookie",
+				Name:        "cg_access",
+				Description: "Cookie httpOnly definido pelo login com useCookies=true (web).",
 			},
 		},
 		Schemas: buildSchemas(),
@@ -59,6 +72,8 @@ func buildSchemas() map[string]*Schema {
 	strArr := func(desc string) *Schema {
 		return &Schema{Type: "array", Items: &Schema{Type: "string"}, Description: desc}
 	}
+	roles := &Schema{Type: "array", Items: &Schema{Type: "string", Enum: []any{"ROLE_USER", "ROLE_ADMIN"}}, Description: "Papéis"}
+	password := &Schema{Type: "string", MinLength: ptr(10), Description: "Senha: 10+ caracteres, até 72 bytes, com letras e números; não pode conter o e-mail ou o username"}
 
 	return map[string]*Schema{
 		// ── Generic ──────────────────────────────────────────────────────────
@@ -69,15 +84,22 @@ func buildSchemas() map[string]*Schema {
 			},
 			Required: []string{"error"},
 		},
+		"Health": {
+			Type: "object",
+			Properties: map[string]*Schema{
+				"status": {Type: "string", Example: "ok"},
+			},
+			Required: []string{"status"},
+		},
 
 		// ── Auth ─────────────────────────────────────────────────────────────
 		"RegisterRequest": {
-			Type: "object",
+			Type:        "object",
+			Description: "O cadastro público sempre cria um morador (ROLE_USER). Papéis enviados aqui são ignorados.",
 			Properties: map[string]*Schema{
-				"username": str("Nome de usuário único"),
-				"email":    strFmt("Endereço de e-mail", "email"),
-				"password": str("Senha em texto plano (será armazenada com bcrypt)"),
-				"roles":    strArr("Lista de papéis (ex: ROLE_USER, ROLE_ADMIN)"),
+				"username": str("Nome de exibição"),
+				"email":    strFmt("E-mail (login); único, sem diferenciar maiúsculas", "email"),
+				"password": password,
 			},
 			Required: []string{"username", "email", "password"},
 		},
@@ -92,18 +114,30 @@ func buildSchemas() map[string]*Schema {
 		"LoginRequest": {
 			Type: "object",
 			Properties: map[string]*Schema{
-				"username": str("Nome de usuário"),
-				"password": str("Senha"),
+				"email":      strFmt("E-mail", "email"),
+				"password":   str("Senha"),
+				"useCookies": boolean("true no web: os tokens vão só para cookies httpOnly e não voltam no corpo"),
 			},
-			Required: []string{"username", "password"},
+			Required: []string{"email", "password"},
 		},
-		"LoginResponse": {
-			Type: "object",
+		"RefreshRequest": {
+			Type:        "object",
+			Description: "No web o corpo pode ser vazio: o refresh token vai no cookie cg_refresh.",
 			Properties: map[string]*Schema{
-				"token": str("Token JWT — enviar em Authorization: Bearer <token>"),
-				"roles": strArr("Papéis do usuário autenticado"),
+				"refreshToken": str("Refresh token recebido no login ou no último refresh"),
 			},
-			Required: []string{"token", "roles"},
+		},
+		"TokenPair": {
+			Type:        "object",
+			Description: "accessToken e refreshToken só vêm no fluxo do app; no fluxo com cookies ficam de fora.",
+			Properties: map[string]*Schema{
+				"accessToken":  str("JWT — enviar em Authorization: Bearer <token>"),
+				"refreshToken": str("Opaco, de uso único: cada refresh devolve um novo e invalida o anterior"),
+				"tokenType":    {Type: "string", Enum: []any{"Bearer"}},
+				"expiresIn":    intg("Validade do access token, em segundos"),
+				"roles":        roles,
+			},
+			Required: []string{"tokenType", "expiresIn", "roles"},
 		},
 
 		// ── User ─────────────────────────────────────────────────────────────
@@ -111,28 +145,28 @@ func buildSchemas() map[string]*Schema {
 			Type: "object",
 			Properties: map[string]*Schema{
 				"id":       str("ID único do usuário"),
-				"username": str("Nome de usuário"),
+				"username": str("Nome de exibição"),
 				"email":    strFmt("E-mail do usuário", "email"),
-				"roles":    strArr("Papéis do usuário"),
+				"roles":    roles,
 			},
 			Required: []string{"id", "username", "email", "roles"},
 		},
 		"CreateUserRequest": {
 			Type: "object",
 			Properties: map[string]*Schema{
-				"username": str("Nome de usuário único"),
+				"username": str("Nome de exibição"),
 				"email":    strFmt("E-mail", "email"),
-				"password": str("Senha"),
-				"roles":    strArr("Papéis"),
+				"password": password,
+				"roles":    roles,
 			},
 			Required: []string{"username", "email", "password"},
 		},
 		"UpdateUserRequest": {
 			Type:        "object",
-			Description: "Apenas username e roles podem ser alterados. E-mail é imutável.",
+			Description: "Apenas username e roles podem ser alterados. E-mail é imutável. Mudar os roles revoga os refresh tokens do usuário.",
 			Properties: map[string]*Schema{
-				"username": str("Novo nome de usuário"),
-				"roles":    strArr("Novos papéis"),
+				"username": str("Novo nome de exibição"),
+				"roles":    roles,
 			},
 		},
 
@@ -143,7 +177,7 @@ func buildSchemas() map[string]*Schema {
 				"id":            str("ID único da residência"),
 				"unitNumber":    str("Número da unidade (único por condomínio)"),
 				"floor":         intg("Andar"),
-				"condominiumId": str("ID do condomínio ao qual pertence"),
+				"condominiumId": str("Bloco/condomínio informado no cadastro"),
 				"ownerId":       str("ID do usuário proprietário"),
 			},
 			Required: []string{"id", "unitNumber", "floor", "condominiumId", "ownerId"},
@@ -153,7 +187,7 @@ func buildSchemas() map[string]*Schema {
 			Properties: map[string]*Schema{
 				"unitNumber":    str("Número da unidade"),
 				"floor":         intg("Andar"),
-				"condominiumId": str("ID do condomínio"),
+				"condominiumId": str("Bloco/condomínio"),
 				"ownerId":       str("ID do proprietário"),
 			},
 			Required: []string{"unitNumber", "condominiumId", "ownerId"},
@@ -172,7 +206,7 @@ func buildSchemas() map[string]*Schema {
 			Properties: map[string]*Schema{
 				"id":       str("ID único da loja"),
 				"shopName": str("Razão social / nome fantasia"),
-				"cnpj":     {Type: "string", Format: "string", Description: "CNPJ no formato XX.XXX.XXX/XXXX-XX"},
+				"cnpj":     str("CNPJ no formato XX.XXX.XXX/XXXX-XX"),
 				"floor":    intg("Andar"),
 				"ownerId":  str("ID do usuário responsável"),
 			},
@@ -203,19 +237,19 @@ func buildSchemas() map[string]*Schema {
 			Properties: map[string]*Schema{
 				"id":          str("ID único da despesa"),
 				"description": str("Descrição"),
-				"amountCents": int64s("Valor em centavos (inteiro positivo)"),
+				"amountCents": int64s("Valor em centavos (inteiro, >= 0)"),
 				"dueDate":     strFmt("Data de vencimento (RFC3339 UTC)", "date-time"),
-				"residentId":  {Type: "string", Nullable: true, Description: "ID da residência vinculada (opcional)"},
-				"shopOwnerId": {Type: "string", Nullable: true, Description: "ID da loja vinculada (opcional)"},
+				"residentId":  str("ID da residência vinculada; \"\" se for de loja"),
+				"shopOwnerId": str("ID da loja vinculada; \"\" se for de residência"),
 			},
-			Required: []string{"id", "description", "amountCents", "dueDate"},
+			Required: []string{"id", "description", "amountCents", "dueDate", "residentId", "shopOwnerId"},
 		},
 		"CreateExpenseRequest": {
 			Type:        "object",
 			Description: "Exige residentId ou shopOwnerId (ao menos um).",
 			Properties: map[string]*Schema{
 				"description": str("Descrição da despesa"),
-				"amountCents": int64s("Valor em centavos (> 0)"),
+				"amountCents": int64s("Valor em centavos (>= 0)"),
 				"dueDate":     strFmt("Data de vencimento (RFC3339)", "date-time"),
 				"residentId":  str("ID da residência (opcional)"),
 				"shopOwnerId": str("ID da loja (opcional)"),
@@ -237,41 +271,180 @@ func buildSchemas() map[string]*Schema {
 			Properties: map[string]*Schema{
 				"id":           str("ID único da notificação"),
 				"message":      str("Conteúdo da mensagem"),
-				"createdById":  str("ID do usuário que criou"),
+				"createdById":  str("ID do usuário que criou (vem do token, nunca do corpo)"),
 				"createdAt":    strFmt("Data de criação (RFC3339)", "date-time"),
-				"read":         boolean("Se a notificação foi lida"),
-				"readAt":       {Type: "string", Format: "date-time", Nullable: true, Description: "Momento em que foi marcada como lida"},
+				"read":         boolean("Se o usuário autenticado já leu"),
+				"readAt":       {Type: "string", Format: "date-time", Nullable: true, Description: "Quando o usuário autenticado leu"},
 				"residentIds":  strArr("IDs das residências destinatárias"),
 				"shopOwnerIds": strArr("IDs das lojas destinatárias"),
 			},
-			Required: []string{"id", "message", "createdById", "createdAt", "read"},
+			Required: []string{"id", "message", "createdById", "createdAt", "read", "residentIds", "shopOwnerIds"},
 		},
 		"CreateNotificationRequest": {
 			Type:        "object",
-			Description: "Exige ao menos um destinatário (residentIds ou shopOwnerIds).",
+			Description: "Exige ao menos um destinatário (residentIds ou shopOwnerIds). O autor é o usuário autenticado.",
 			Properties: map[string]*Schema{
 				"message":      str("Conteúdo da mensagem"),
-				"createdById":  str("ID do usuário que está criando"),
 				"residentIds":  strArr("IDs das residências destinatárias"),
 				"shopOwnerIds": strArr("IDs das lojas destinatárias"),
 			},
-			Required: []string{"message", "createdById"},
+			Required: []string{"message"},
 		},
 		"UpdateNotificationRequest": {
-			Type: "object",
+			Type:        "object",
+			Description: "Lista presente substitui a gravada, mesmo vazia ([] limpa); lista ausente é mantida. Deve sobrar ao menos um destinatário.",
 			Properties: map[string]*Schema{
 				"message":      str("Nova mensagem"),
 				"residentIds":  strArr("Novos destinatários (residências)"),
 				"shopOwnerIds": strArr("Novos destinatários (lojas)"),
 			},
 		},
+
+		// ── Pages ─────────────────────────────────────────────────────────────
+		"UserPage":         pageSchema("User"),
+		"ResidentPage":     pageSchema("Resident"),
+		"ShopOwnerPage":    pageSchema("ShopOwner"),
+		"ExpensePage":      pageSchema("Expense"),
+		"NotificationPage": pageSchema("Notification"),
 	}
 }
 
 // ── Paths ─────────────────────────────────────────────────────────────────────
 
+// crud describes one resource for crudPaths.
+type crud struct {
+	tag, schema, noun string // e.g. "Residents", "Resident", "residência"
+	opID              string // e.g. "Resident" → listResidents, createResident...
+	createDesc        string
+	conflict          string // 409 description on create/update; "" for none
+	extraListParams   []Parameter
+}
+
+// crudPaths builds the collection and item paths of a resource.
+func crudPaths(c crud) (collection, item PathItem) {
+	idParam := pathParam("id", "ID do recurso")
+	forbidden := errResp("ROLE_ADMIN necessário")
+	notFound := errResp(c.noun + " não encontrada(o), ou de outro usuário/condomínio")
+	unauth := errResp("Não autenticado")
+
+	create := map[string]*Response{
+		"201": jsonResp("Criado", c.schema),
+		"401": unauth,
+		"403": forbidden,
+		"422": errResp("Dados inválidos"),
+	}
+	update := map[string]*Response{
+		"200": jsonResp("Atualizado", c.schema),
+		"401": unauth,
+		"403": forbidden,
+		"404": notFound,
+		"422": errResp("Dados inválidos"),
+	}
+	if c.conflict != "" {
+		create["409"] = errResp(c.conflict)
+		update["409"] = errResp(c.conflict)
+	}
+
+	collection = PathItem{
+		"get": {
+			Tags:        []string{c.tag},
+			Summary:     "Listar " + c.tag,
+			Description: "Admin: todos do condomínio. Usuário: só os seus.",
+			OperationID: "list" + c.opID + "s",
+			Security:    bearerSecurity,
+			Parameters:  append(append([]Parameter{}, pageParams...), c.extraListParams...),
+			Responses: map[string]*Response{
+				"200": jsonPageResp("Página de "+c.tag, c.schema),
+				"400": errResp("Parâmetro inválido"),
+				"401": unauth,
+			},
+		},
+		"post": {
+			Tags:        []string{c.tag},
+			Summary:     "Criar (ROLE_ADMIN)",
+			Description: c.createDesc,
+			OperationID: "create" + c.opID,
+			Security:    bearerSecurity,
+			RequestBody: jsonBody("Create"+c.schema+"Request", true),
+			Responses:   create,
+		},
+	}
+	item = PathItem{
+		"get": {
+			Tags:        []string{c.tag},
+			Summary:     "Obter por ID",
+			OperationID: "get" + c.opID + "ByID",
+			Security:    bearerSecurity,
+			Parameters:  []Parameter{idParam},
+			Responses: map[string]*Response{
+				"200": jsonResp("Encontrado", c.schema),
+				"401": unauth,
+				"404": notFound,
+			},
+		},
+		"put": {
+			Tags:        []string{c.tag},
+			Summary:     "Atualizar (ROLE_ADMIN)",
+			OperationID: "update" + c.opID,
+			Security:    bearerSecurity,
+			Parameters:  []Parameter{idParam},
+			RequestBody: jsonBody("Update"+c.schema+"Request", true),
+			Responses:   update,
+		},
+		"delete": {
+			Tags:        []string{c.tag},
+			Summary:     "Remover (ROLE_ADMIN)",
+			OperationID: "delete" + c.opID,
+			Security:    bearerSecurity,
+			Parameters:  []Parameter{idParam},
+			Responses: map[string]*Response{
+				"204": noContentResp(),
+				"401": unauth,
+				"403": forbidden,
+				"404": notFound,
+			},
+		},
+	}
+	return collection, item
+}
+
 func buildPaths() map[string]PathItem {
 	idParam := pathParam("id", "ID do recurso")
+	public := []SecurityRequirement{} // explicit empty: no auth
+
+	residents, resident := crudPaths(crud{
+		tag: "Residents", schema: "Resident", noun: "Residência", opID: "Resident",
+		createDesc: "unitNumber deve ser único dentro do mesmo condominiumId.",
+		conflict:   "Número de unidade já existe neste condomínio",
+	})
+	shops, shop := crudPaths(crud{
+		tag: "ShopOwners", schema: "ShopOwner", noun: "Loja", opID: "ShopOwner",
+		createDesc: "CNPJ é validado (dígito verificador) e normalizado para XX.XXX.XXX/XXXX-XX. " +
+			"/shopOwners continua aceito como sinônimo de /shop-owners.",
+		conflict: "CNPJ já cadastrado",
+	})
+	expenses, expense := crudPaths(crud{
+		tag: "Expenses", schema: "Expense", noun: "Despesa", opID: "Expense",
+		createDesc: "amountCents >= 0. Exige residentId ou shopOwnerId.",
+		extraListParams: []Parameter{
+			{Name: "from", In: "query", Description: "Vencimento a partir de (RFC3339)", Schema: &Schema{Type: "string", Format: "date-time"}},
+			{Name: "to", In: "query", Description: "Vencimento até (RFC3339)", Schema: &Schema{Type: "string", Format: "date-time"}},
+		},
+	})
+	notifications, notification := crudPaths(crud{
+		tag: "Notifications", schema: "Notification", noun: "Notificação", opID: "Notification",
+		createDesc: "Exige ao menos um destinatário. createdById é o usuário autenticado. " +
+			"Usuários só veem as notificações endereçadas às suas unidades e lojas.",
+	})
+
+	users, userItem := crudPaths(crud{
+		tag: "Users", schema: "User", noun: "Usuário", opID: "User",
+		conflict: "E-mail já cadastrado",
+	})
+	users["get"].Summary, users["get"].Description = "Listar usuários (ROLE_ADMIN)", ""
+	users["get"].Responses["403"] = errResp("ROLE_ADMIN necessário")
+	userItem["get"].Summary = "Obter usuário por ID (ROLE_ADMIN)"
+	userItem["get"].Responses["403"] = errResp("ROLE_ADMIN necessário")
 
 	return map[string]PathItem{
 		// ── System ───────────────────────────────────────────────────────────
@@ -280,20 +453,9 @@ func buildPaths() map[string]PathItem {
 				Tags:        []string{"System"},
 				Summary:     "Health check",
 				OperationID: "getHealth",
+				Security:    public,
 				Responses: map[string]*Response{
-					"200": {
-						Description: "Servidor disponível",
-						Content: map[string]MediaType{
-							"application/json": {
-								Schema: &Schema{
-									Type: "object",
-									Properties: map[string]*Schema{
-										"status": {Type: "string", Example: "ok"},
-									},
-								},
-							},
-						},
-					},
+					"200": jsonResp("Servidor disponível", "Health"),
 				},
 			},
 		},
@@ -302,402 +464,106 @@ func buildPaths() map[string]PathItem {
 		"/auth/register": {
 			"post": {
 				Tags:        []string{"Auth"},
-				Summary:     "Registrar novo usuário",
+				Summary:     "Cadastrar morador",
+				Description: "Cria sempre um ROLE_USER. Administradores são criados por um admin em POST /users.",
 				OperationID: "authRegister",
-				Security:    []SecurityRequirement{}, // public — explicit empty
+				Security:    public,
 				RequestBody: jsonBody("RegisterRequest", true),
 				Responses: map[string]*Response{
 					"201": jsonResp("Usuário registrado", "RegisterResponse"),
+					"400": errResp("JSON inválido"),
 					"409": errResp("E-mail já cadastrado"),
-					"422": errResp("Dados inválidos"),
+					"413": errResp("Corpo maior que 1 MiB"),
+					"422": errResp("Dados inválidos ou senha fora da política"),
 				},
 			},
 		},
 		"/auth/login": {
 			"post": {
 				Tags:        []string{"Auth"},
-				Summary:     "Autenticar e obter token JWT",
+				Summary:     "Entrar (e-mail e senha)",
+				Description: "Abre uma sessão. Com useCookies=true define os cookies httpOnly cg_access e cg_refresh.",
 				OperationID: "authLogin",
-				Security:    []SecurityRequirement{},
+				Security:    public,
 				RequestBody: jsonBody("LoginRequest", true),
 				Responses: map[string]*Response{
-					"200": jsonResp("Login bem-sucedido", "LoginResponse"),
+					"200": jsonResp("Login bem-sucedido", "TokenPair"),
 					"400": errResp("Corpo inválido: precisa ser um único objeto JSON de até 64 KiB"),
 					"401": errResp("Credenciais inválidas"),
 					"422": errResp("Dados inválidos"),
-					"429": errResp("Muitas tentativas com falha para este usuário a partir deste IP; tente após o tempo do cabeçalho Retry-After"),
+					"429": errResp("Muitas tentativas com falha (por e-mail e IP, ou só por IP); tente após o tempo do cabeçalho Retry-After"),
+				},
+			},
+		},
+		"/auth/refresh": {
+			"post": {
+				Tags:    []string{"Auth"},
+				Summary: "Renovar a sessão (refresh rotativo)",
+				Description: "Troca o refresh token por um par novo; o antigo deixa de valer. Reusar um refresh já trocado " +
+					"revoga a sessão inteira. Sem refreshToken no corpo, usa o cookie cg_refresh (exige Origin permitido).",
+				OperationID: "authRefresh",
+				Security:    public,
+				RequestBody: jsonBody("RefreshRequest", false),
+				Responses: map[string]*Response{
+					"200": jsonResp("Novo par", "TokenPair"),
+					"401": errResp("Refresh inválido, expirado ou revogado"),
+					"403": errResp("Cookie enviado de uma origem não permitida"),
+				},
+			},
+		},
+		"/auth/logout": {
+			"post": {
+				Tags:        []string{"Auth"},
+				Summary:     "Sair",
+				Description: "Revoga a sessão do refresh token (corpo ou cookie) e apaga os cookies. Sempre 204.",
+				OperationID: "authLogout",
+				Security:    public,
+				RequestBody: jsonBody("RefreshRequest", false),
+				Responses: map[string]*Response{
+					"204": noContentResp(),
+					"403": errResp("Cookie enviado de uma origem não permitida"),
 				},
 			},
 		},
 
 		// ── Users ─────────────────────────────────────────────────────────────
-		"/users": {
+		"/users/me": {
 			"get": {
 				Tags:        []string{"Users"},
-				Summary:     "Listar usuários",
-				OperationID: "listUsers",
+				Summary:     "Minha conta",
+				Description: "Disponível para qualquer usuário autenticado.",
+				OperationID: "getMe",
 				Security:    bearerSecurity,
 				Responses: map[string]*Response{
-					"200": jsonArrayResp("Lista de usuários", "User"),
+					"200": jsonResp("Usuário autenticado", "User"),
 					"401": errResp("Não autenticado"),
-					"403": errResp("ROLE_ADMIN necessário"),
-				},
-			},
-			"post": {
-				Tags:        []string{"Users"},
-				Summary:     "Criar usuário",
-				OperationID: "createUser",
-				Security:    bearerSecurity,
-				RequestBody: jsonBody("CreateUserRequest", true),
-				Responses: map[string]*Response{
-					"201": jsonResp("Usuário criado", "User"),
-					"401": errResp("Não autenticado"),
-					"403": errResp("ROLE_ADMIN necessário"),
-					"409": errResp("E-mail já cadastrado"),
-					"422": errResp("Dados inválidos"),
 				},
 			},
 		},
-		"/users/{id}": {
-			"get": {
-				Tags:        []string{"Users"},
-				Summary:     "Obter usuário por ID",
-				OperationID: "getUserByID",
-				Security:    bearerSecurity,
-				Parameters:  []Parameter{idParam},
-				Responses: map[string]*Response{
-					"200": jsonResp("Usuário encontrado", "User"),
-					"401": errResp("Não autenticado"),
-					"403": errResp("ROLE_ADMIN necessário"),
-					"404": errResp("Usuário não encontrado"),
-				},
-			},
-			"put": {
-				Tags:        []string{"Users"},
-				Summary:     "Atualizar usuário",
-				Description: "E-mail é imutável após criação.",
-				OperationID: "updateUser",
-				Security:    bearerSecurity,
-				Parameters:  []Parameter{idParam},
-				RequestBody: jsonBody("UpdateUserRequest", true),
-				Responses: map[string]*Response{
-					"200": jsonResp("Usuário atualizado", "User"),
-					"401": errResp("Não autenticado"),
-					"403": errResp("ROLE_ADMIN necessário"),
-					"404": errResp("Usuário não encontrado"),
-				},
-			},
-			"delete": {
-				Tags:        []string{"Users"},
-				Summary:     "Remover usuário",
-				OperationID: "deleteUser",
-				Security:    bearerSecurity,
-				Parameters:  []Parameter{idParam},
-				Responses: map[string]*Response{
-					"204": noContentResp(),
-					"401": errResp("Não autenticado"),
-					"403": errResp("ROLE_ADMIN necessário"),
-					"404": errResp("Usuário não encontrado"),
-				},
-			},
-		},
+		"/users":      users,
+		"/users/{id}": userItem,
 
-		// ── Residents ─────────────────────────────────────────────────────────
-		"/residents": {
-			"get": {
-				Tags:        []string{"Residents"},
-				Summary:     "Listar residências",
-				OperationID: "listResidents",
-				Security:    bearerSecurity,
-				Responses: map[string]*Response{
-					"200": jsonArrayResp("Lista de residências", "Resident"),
-					"401": errResp("Não autenticado"),
-				},
-			},
-			"post": {
-				Tags:        []string{"Residents"},
-				Summary:     "Criar residência",
-				Description: "unitNumber deve ser único dentro do mesmo condominiumId.",
-				OperationID: "createResident",
-				Security:    bearerSecurity,
-				RequestBody: jsonBody("CreateResidentRequest", true),
-				Responses: map[string]*Response{
-					"201": jsonResp("Residência criada", "Resident"),
-					"401": errResp("Não autenticado"),
-					"409": errResp("Número de unidade já existe neste condomínio"),
-					"422": errResp("Dados inválidos"),
-				},
-			},
-		},
-		"/residents/{id}": {
-			"get": {
-				Tags:        []string{"Residents"},
-				Summary:     "Obter residência por ID",
-				OperationID: "getResidentByID",
-				Security:    bearerSecurity,
-				Parameters:  []Parameter{idParam},
-				Responses: map[string]*Response{
-					"200": jsonResp("Residência encontrada", "Resident"),
-					"401": errResp("Não autenticado"),
-					"404": errResp("Residência não encontrada"),
-				},
-			},
-			"put": {
-				Tags:        []string{"Residents"},
-				Summary:     "Atualizar residência",
-				OperationID: "updateResident",
-				Security:    bearerSecurity,
-				Parameters:  []Parameter{idParam},
-				RequestBody: jsonBody("UpdateResidentRequest", true),
-				Responses: map[string]*Response{
-					"200": jsonResp("Residência atualizada", "Resident"),
-					"401": errResp("Não autenticado"),
-					"404": errResp("Residência não encontrada"),
-					"409": errResp("Número de unidade já existe neste condomínio"),
-					"422": errResp("Dados inválidos"),
-				},
-			},
-			"delete": {
-				Tags:        []string{"Residents"},
-				Summary:     "Remover residência",
-				OperationID: "deleteResident",
-				Security:    bearerSecurity,
-				Parameters:  []Parameter{idParam},
-				Responses: map[string]*Response{
-					"204": noContentResp(),
-					"401": errResp("Não autenticado"),
-					"404": errResp("Residência não encontrada"),
-				},
-			},
-		},
-
-		// ── ShopOwners ─────────────────────────────────────────────────────────
-		"/shopOwners": {
-			"get": {
-				Tags:        []string{"ShopOwners"},
-				Summary:     "Listar lojas",
-				OperationID: "listShopOwners",
-				Security:    bearerSecurity,
-				Responses: map[string]*Response{
-					"200": jsonArrayResp("Lista de lojas", "ShopOwner"),
-					"401": errResp("Não autenticado"),
-				},
-			},
-			"post": {
-				Tags:        []string{"ShopOwners"},
-				Summary:     "Criar loja",
-				Description: "CNPJ é validado (dígito verificador) e normalizado para XX.XXX.XXX/XXXX-XX.",
-				OperationID: "createShopOwner",
-				Security:    bearerSecurity,
-				RequestBody: jsonBody("CreateShopOwnerRequest", true),
-				Responses: map[string]*Response{
-					"201": jsonResp("Loja criada", "ShopOwner"),
-					"401": errResp("Não autenticado"),
-					"409": errResp("CNPJ já cadastrado"),
-					"422": errResp("CNPJ inválido ou dados ausentes"),
-				},
-			},
-		},
-		"/shopOwners/{id}": {
-			"get": {
-				Tags:        []string{"ShopOwners"},
-				Summary:     "Obter loja por ID",
-				OperationID: "getShopOwnerByID",
-				Security:    bearerSecurity,
-				Parameters:  []Parameter{idParam},
-				Responses: map[string]*Response{
-					"200": jsonResp("Loja encontrada", "ShopOwner"),
-					"401": errResp("Não autenticado"),
-					"404": errResp("Loja não encontrada"),
-				},
-			},
-			"put": {
-				Tags:        []string{"ShopOwners"},
-				Summary:     "Atualizar loja",
-				Description: "CNPJ é imutável após criação.",
-				OperationID: "updateShopOwner",
-				Security:    bearerSecurity,
-				Parameters:  []Parameter{idParam},
-				RequestBody: jsonBody("UpdateShopOwnerRequest", true),
-				Responses: map[string]*Response{
-					"200": jsonResp("Loja atualizada", "ShopOwner"),
-					"401": errResp("Não autenticado"),
-					"404": errResp("Loja não encontrada"),
-					"422": errResp("Dados inválidos"),
-				},
-			},
-			"delete": {
-				Tags:        []string{"ShopOwners"},
-				Summary:     "Remover loja",
-				OperationID: "deleteShopOwner",
-				Security:    bearerSecurity,
-				Parameters:  []Parameter{idParam},
-				Responses: map[string]*Response{
-					"204": noContentResp(),
-					"401": errResp("Não autenticado"),
-					"404": errResp("Loja não encontrada"),
-				},
-			},
-		},
-
-		// ── Expenses ──────────────────────────────────────────────────────────
-		"/expenses": {
-			"get": {
-				Tags:        []string{"Expenses"},
-				Summary:     "Listar despesas",
-				Description: "Suporta filtro por período: ?from=2026-01-01T00:00:00Z&to=2026-01-31T23:59:59Z",
-				OperationID: "listExpenses",
-				Security:    bearerSecurity,
-				Parameters: []Parameter{
-					{
-						Name: "from", In: "query",
-						Description: "Data de início do filtro (RFC3339)",
-						Schema:      &Schema{Type: "string", Format: "date-time"},
-					},
-					{
-						Name: "to", In: "query",
-						Description: "Data de fim do filtro (RFC3339)",
-						Schema:      &Schema{Type: "string", Format: "date-time"},
-					},
-				},
-				Responses: map[string]*Response{
-					"200": jsonArrayResp("Lista de despesas", "Expense"),
-					"400": errResp("Parâmetro de data inválido"),
-					"401": errResp("Não autenticado"),
-				},
-			},
-			"post": {
-				Tags:        []string{"Expenses"},
-				Summary:     "Criar despesa",
-				Description: "amountCents deve ser > 0. Exige residentId ou shopOwnerId.",
-				OperationID: "createExpense",
-				Security:    bearerSecurity,
-				RequestBody: jsonBody("CreateExpenseRequest", true),
-				Responses: map[string]*Response{
-					"201": jsonResp("Despesa criada", "Expense"),
-					"401": errResp("Não autenticado"),
-					"422": errResp("Dados inválidos (valor negativo, data ausente, sem unidade)"),
-				},
-			},
-		},
-		"/expenses/{id}": {
-			"get": {
-				Tags:        []string{"Expenses"},
-				Summary:     "Obter despesa por ID",
-				OperationID: "getExpenseByID",
-				Security:    bearerSecurity,
-				Parameters:  []Parameter{idParam},
-				Responses: map[string]*Response{
-					"200": jsonResp("Despesa encontrada", "Expense"),
-					"401": errResp("Não autenticado"),
-					"404": errResp("Despesa não encontrada"),
-				},
-			},
-			"put": {
-				Tags:        []string{"Expenses"},
-				Summary:     "Atualizar despesa",
-				OperationID: "updateExpense",
-				Security:    bearerSecurity,
-				Parameters:  []Parameter{idParam},
-				RequestBody: jsonBody("UpdateExpenseRequest", true),
-				Responses: map[string]*Response{
-					"200": jsonResp("Despesa atualizada", "Expense"),
-					"401": errResp("Não autenticado"),
-					"404": errResp("Despesa não encontrada"),
-					"422": errResp("Dados inválidos"),
-				},
-			},
-			"delete": {
-				Tags:        []string{"Expenses"},
-				Summary:     "Remover despesa",
-				OperationID: "deleteExpense",
-				Security:    bearerSecurity,
-				Parameters:  []Parameter{idParam},
-				Responses: map[string]*Response{
-					"204": noContentResp(),
-					"401": errResp("Não autenticado"),
-					"404": errResp("Despesa não encontrada"),
-				},
-			},
-		},
-
-		// ── Notifications ──────────────────────────────────────────────────────
-		"/notifications": {
-			"get": {
-				Tags:        []string{"Notifications"},
-				Summary:     "Listar notificações",
-				OperationID: "listNotifications",
-				Security:    bearerSecurity,
-				Responses: map[string]*Response{
-					"200": jsonArrayResp("Lista de notificações", "Notification"),
-					"401": errResp("Não autenticado"),
-				},
-			},
-			"post": {
-				Tags:        []string{"Notifications"},
-				Summary:     "Criar notificação",
-				Description: "Exige ao menos um destinatário (residentIds ou shopOwnerIds).",
-				OperationID: "createNotification",
-				Security:    bearerSecurity,
-				RequestBody: jsonBody("CreateNotificationRequest", true),
-				Responses: map[string]*Response{
-					"201": jsonResp("Notificação criada", "Notification"),
-					"401": errResp("Não autenticado"),
-					"422": errResp("Mensagem ausente ou sem destinatários"),
-				},
-			},
-		},
-		"/notifications/{id}": {
-			"get": {
-				Tags:        []string{"Notifications"},
-				Summary:     "Obter notificação por ID",
-				OperationID: "getNotificationByID",
-				Security:    bearerSecurity,
-				Parameters:  []Parameter{idParam},
-				Responses: map[string]*Response{
-					"200": jsonResp("Notificação encontrada", "Notification"),
-					"401": errResp("Não autenticado"),
-					"404": errResp("Notificação não encontrada"),
-				},
-			},
-			"put": {
-				Tags:        []string{"Notifications"},
-				Summary:     "Atualizar notificação",
-				OperationID: "updateNotification",
-				Security:    bearerSecurity,
-				Parameters:  []Parameter{idParam},
-				RequestBody: jsonBody("UpdateNotificationRequest", true),
-				Responses: map[string]*Response{
-					"200": jsonResp("Notificação atualizada", "Notification"),
-					"401": errResp("Não autenticado"),
-					"404": errResp("Notificação não encontrada"),
-				},
-			},
-			"delete": {
-				Tags:        []string{"Notifications"},
-				Summary:     "Remover notificação",
-				OperationID: "deleteNotification",
-				Security:    bearerSecurity,
-				Parameters:  []Parameter{idParam},
-				Responses: map[string]*Response{
-					"204": noContentResp(),
-					"401": errResp("Não autenticado"),
-					"404": errResp("Notificação não encontrada"),
-				},
-			},
-		},
+		// ── Domain resources ──────────────────────────────────────────────────
+		"/residents":          residents,
+		"/residents/{id}":     resident,
+		"/shop-owners":        shops,
+		"/shop-owners/{id}":   shop,
+		"/expenses":           expenses,
+		"/expenses/{id}":      expense,
+		"/notifications":      notifications,
+		"/notifications/{id}": notification,
 		"/notifications/{id}/read": {
 			"put": {
 				Tags:        []string{"Notifications"},
-				Summary:     "Marcar notificação como lida",
-				Description: "Operação idempotente. Chamar múltiplas vezes não altera o readAt.",
+				Summary:     "Marcar como lida (para mim)",
+				Description: "A leitura é por destinatário. Idempotente: chamar de novo não altera o readAt.",
 				OperationID: "markNotificationAsRead",
 				Security:    bearerSecurity,
 				Parameters:  []Parameter{idParam},
 				Responses: map[string]*Response{
-					"200": jsonResp("Estado atual da notificação (read=true)", "Notification"),
+					"200": jsonResp("Notificação com read=true para o usuário autenticado", "Notification"),
 					"401": errResp("Não autenticado"),
-					"404": errResp("Notificação não encontrada"),
+					"404": errResp("Notificação não encontrada, ou não endereçada a você"),
 				},
 			},
 		},
