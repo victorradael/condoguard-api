@@ -57,6 +57,8 @@ com pelo menos 32 bytes, nem com `CORS_ALLOWED_ORIGINS=*`.
 | `COOKIE_DOMAIN` | Domínio dos cookies. Com web e API em subdomínios diferentes, use o domínio comum para o `middleware.ts` do web ver a sessão | host da API |
 | `COOKIE_PATH_PREFIX` | Prefixo com que o navegador chega à API quando um proxy a monta num subcaminho (ex.: `/api`). O cookie de refresh fica em `<prefixo>/auth` | — (API na raiz) |
 | `METRICS_TOKEN` | Bearer exigido em `/metrics` (≥ 32 caracteres). Vazio desliga `/metrics` | — |
+| `TRUSTED_PROXIES` | CIDRs (ou IPs) do proxy reverso, separados por vírgula. Só de uma conexão vinda deles a API aceita `X-Real-IP` como IP do cliente nos limites por IP; de qualquer outra origem o cabeçalho é ignorado. Vazio = usa sempre o IP da conexão | — |
+| `APP_ENV` | `production` exige `DATABASE_URL`, `REDIS_URL` e `CORS_ALLOWED_ORIGINS` (a API não sobe com memória nem com a origem padrão) | — |
 | `PORT` | Porta do servidor HTTP | `8080` |
 
 ## Rodando localmente

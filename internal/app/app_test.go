@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +24,7 @@ func clearEnv(t *testing.T) {
 		"LOGIN_MAX_ATTEMPTS", "LOGIN_MAX_ATTEMPTS_PER_IP", "LOGIN_LOCKOUT_WINDOW",
 		"REGISTER_MAX_PER_IP", "REGISTER_WINDOW",
 		"ACCESS_TOKEN_TTL", "REFRESH_TOKEN_TTL", "CORS_ALLOWED_ORIGINS",
-		"COOKIE_SECURE", "COOKIE_DOMAIN", "COOKIE_PATH_PREFIX", "METRICS_TOKEN",
+		"COOKIE_SECURE", "COOKIE_DOMAIN", "COOKIE_PATH_PREFIX", "METRICS_TOKEN", "TRUSTED_PROXIES", "APP_ENV",
 	} {
 		t.Setenv(k, "")
 	}
@@ -100,6 +101,7 @@ func TestConfigFromEnv_Invalid(t *testing.T) {
 		"REGISTER_MAX_PER_IP":  "0",
 		"REGISTER_WINDOW":      "0s",
 		"COOKIE_PATH_PREFIX":   "/api/",
+		"TRUSTED_PROXIES":      "caddy",
 	} {
 		t.Run(k, func(t *testing.T) {
 			clearEnv(t)
@@ -108,6 +110,72 @@ func TestConfigFromEnv_Invalid(t *testing.T) {
 				t.Errorf("%s=%q must be rejected", k, v)
 			}
 		})
+	}
+}
+
+func TestConfigFromEnv_TrustedProxies(t *testing.T) {
+	clearEnv(t)
+	cfg, err := app.ConfigFromEnv()
+	if err != nil || len(cfg.TrustedProxies) != 0 {
+		t.Fatalf("no proxy must be trusted by default: %v, %v", cfg.TrustedProxies, err)
+	}
+	t.Setenv("TRUSTED_PROXIES", "172.28.0.0/24")
+	if cfg, err = app.ConfigFromEnv(); err != nil || len(cfg.TrustedProxies) != 1 || cfg.TrustedProxies[0].String() != "172.28.0.0/24" {
+		t.Errorf("TRUSTED_PROXIES: %v, %v", cfg.TrustedProxies, err)
+	}
+}
+
+// I4 (FAB-14): production must not fall back to memory or dev defaults.
+func TestConfigFromEnv_Production_RequiresInfrastructure(t *testing.T) {
+	set := func(t *testing.T) {
+		clearEnv(t)
+		t.Setenv("APP_ENV", "production")
+		t.Setenv("DATABASE_URL", "postgres://u:p@db/condoguard")
+		t.Setenv("REDIS_URL", "redis://:p@redis:6379/0")
+		t.Setenv("CORS_ALLOWED_ORIGINS", "https://condoguard.example")
+	}
+	set(t)
+	if cfg, err := app.ConfigFromEnv(); err != nil || !cfg.Production {
+		t.Fatalf("complete production config rejected: %v", err)
+	}
+	for _, k := range []string{"DATABASE_URL", "REDIS_URL", "CORS_ALLOWED_ORIGINS"} {
+		t.Run(k, func(t *testing.T) {
+			set(t)
+			t.Setenv(k, "")
+			if _, err := app.ConfigFromEnv(); err == nil || !strings.Contains(err.Error(), k) {
+				t.Errorf("APP_ENV=production without %s must be rejected, got %v", k, err)
+			}
+		})
+	}
+}
+
+// FAB-16: behind the trusted proxy each client has its own login counter.
+func TestRouter_LoginLimitPerClientBehindTrustedProxy(t *testing.T) {
+	cfg := app.Config{
+		JWTSecret: testSecret, CondominiumID: "c", LoginMaxAttempts: 50, LoginMaxAttemptsPerIP: 2, LoginLockoutWindow: time.Minute,
+		TrustedProxies: []netip.Prefix{netip.MustParsePrefix("172.28.0.0/24")},
+	}
+	a, err := app.New(context.Background(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), middleware.NewMetrics())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+
+	login := func(realIP string) int {
+		req := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"email":"x@exemplo.test","password":"wrong"}`))
+		req.RemoteAddr = "172.28.0.10:40000"
+		req.Header.Set("X-Real-IP", realIP)
+		rec := httptest.NewRecorder()
+		a.Handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	login("203.0.113.1")
+	login("203.0.113.1")
+	if code := login("203.0.113.1"); code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 for the guessing client, got %d", code)
+	}
+	if code := login("203.0.113.2"); code != http.StatusUnauthorized {
+		t.Errorf("another client behind the proxy must not be locked, got %d", code)
 	}
 }
 
