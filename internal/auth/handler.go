@@ -18,6 +18,10 @@ type CookieOptions struct {
 	Secure bool
 	// Domain is the cookie domain; empty means the API host only.
 	Domain string
+	// PathPrefix is the path the browser uses to reach the API when a proxy
+	// mounts it under a prefix (e.g. "/api"). The refresh cookie is scoped to
+	// PathPrefix+"/auth"; empty means the API is served at the root.
+	PathPrefix string
 	// AllowedOrigins are the browser origins allowed to log in, refresh or
 	// log out with the cookie (CSRF protection).
 	AllowedOrigins []string
@@ -157,7 +161,7 @@ func (h *Handler) respondTokens(w http.ResponseWriter, t *Tokens, useCookies boo
 		return
 	}
 	h.setCookie(w, middleware.AccessCookie, t.AccessToken, "/", http.SameSiteLaxMode, t.AccessTTL)
-	h.setCookie(w, middleware.RefreshCookie, t.RefreshToken, "/auth", http.SameSiteStrictMode, t.RefreshTTL)
+	h.setCookie(w, middleware.RefreshCookie, t.RefreshToken, h.refreshPath(), http.SameSiteStrictMode, t.RefreshTTL)
 	body := t.Pair()
 	body.AccessToken, body.RefreshToken = "", "" // scripts on the page never see the tokens
 	writeJSON(w, http.StatusOK, body)
@@ -165,8 +169,12 @@ func (h *Handler) respondTokens(w http.ResponseWriter, t *Tokens, useCookies boo
 
 func (h *Handler) clearCookies(w http.ResponseWriter) {
 	h.setCookie(w, middleware.AccessCookie, "", "/", http.SameSiteLaxMode, -1)
-	h.setCookie(w, middleware.RefreshCookie, "", "/auth", http.SameSiteStrictMode, -1)
+	h.setCookie(w, middleware.RefreshCookie, "", h.refreshPath(), http.SameSiteStrictMode, -1)
 }
+
+// refreshPath is where the browser sends the refresh cookie: only the auth
+// routes, as seen through the proxy prefix.
+func (h *Handler) refreshPath() string { return h.cookies.PathPrefix + "/auth" }
 
 // setCookie writes an httpOnly cookie. ttl < 0 deletes it.
 func (h *Handler) setCookie(w http.ResponseWriter, name, value, path string, sameSite http.SameSite, ttl time.Duration) {

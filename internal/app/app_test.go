@@ -23,7 +23,7 @@ func clearEnv(t *testing.T) {
 		"LOGIN_MAX_ATTEMPTS", "LOGIN_MAX_ATTEMPTS_PER_IP", "LOGIN_LOCKOUT_WINDOW",
 		"REGISTER_MAX_PER_IP", "REGISTER_WINDOW",
 		"ACCESS_TOKEN_TTL", "REFRESH_TOKEN_TTL", "CORS_ALLOWED_ORIGINS",
-		"COOKIE_SECURE", "COOKIE_DOMAIN", "METRICS_TOKEN",
+		"COOKIE_SECURE", "COOKIE_DOMAIN", "COOKIE_PATH_PREFIX", "METRICS_TOKEN",
 	} {
 		t.Setenv(k, "")
 	}
@@ -53,11 +53,12 @@ func TestConfigFromEnv_Overrides(t *testing.T) {
 	t.Setenv("DB_MIGRATE_ON_START", "false")
 	t.Setenv("LOGIN_MAX_ATTEMPTS", "3")
 	t.Setenv("LOGIN_LOCKOUT_WINDOW", "2m")
+	t.Setenv("COOKIE_PATH_PREFIX", "/api")
 	cfg, err := app.ConfigFromEnv()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.CondominiumID != "condo-x" || cfg.MigrateOnStart || cfg.LoginMaxAttempts != 3 || cfg.LoginLockoutWindow != 2*time.Minute {
+	if cfg.CondominiumID != "condo-x" || cfg.MigrateOnStart || cfg.LoginMaxAttempts != 3 || cfg.LoginLockoutWindow != 2*time.Minute || cfg.CookiePathPrefix != "/api" {
 		t.Errorf("unexpected config: %+v", cfg)
 	}
 }
@@ -98,6 +99,7 @@ func TestConfigFromEnv_Invalid(t *testing.T) {
 		"COOKIE_SECURE":        "perhaps",
 		"REGISTER_MAX_PER_IP":  "0",
 		"REGISTER_WINDOW":      "0s",
+		"COOKIE_PATH_PREFIX":   "/api/",
 	} {
 		t.Run(k, func(t *testing.T) {
 			clearEnv(t)

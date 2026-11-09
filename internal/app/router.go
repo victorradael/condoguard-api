@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -48,6 +49,7 @@ type Config struct {
 	CORSAllowedOrigins    []string      // CORS_ALLOWED_ORIGINS (default http://localhost:3000); "*" is rejected
 	CookieSecure          bool          // COOKIE_SECURE (default true); false only for plain-HTTP local dev
 	CookieDomain          string        // COOKIE_DOMAIN (default: API host only)
+	CookiePathPrefix      string        // COOKIE_PATH_PREFIX: proxy prefix of the API as the browser sees it (e.g. /api; default none)
 	MetricsToken          string        // METRICS_TOKEN; empty disables /metrics
 }
 
@@ -70,6 +72,7 @@ func ConfigFromEnv() (Config, error) {
 		RefreshTokenTTL:       auth.DefaultRefreshTTL,
 		CookieSecure:          true,
 		CookieDomain:          os.Getenv("COOKIE_DOMAIN"),
+		CookiePathPrefix:      os.Getenv("COOKIE_PATH_PREFIX"),
 		MetricsToken:          os.Getenv("METRICS_TOKEN"),
 	}
 	if cfg.CondominiumID == "" {
@@ -80,6 +83,9 @@ func ConfigFromEnv() (Config, error) {
 	}
 	if cfg.MetricsToken != "" && len(cfg.MetricsToken) < 32 {
 		return cfg, fmt.Errorf("METRICS_TOKEN must have at least 32 characters (or be empty to disable /metrics)")
+	}
+	if p := cfg.CookiePathPrefix; p != "" && (!strings.HasPrefix(p, "/") || strings.HasSuffix(p, "/") || strings.ContainsAny(p, ";, \t")) {
+		return cfg, fmt.Errorf("COOKIE_PATH_PREFIX must look like /api (leading slash, no trailing slash)")
 	}
 	origins := os.Getenv("CORS_ALLOWED_ORIGINS")
 	if origins == "" {
@@ -299,7 +305,7 @@ func newHandler(cfg Config, jwtSvc *pkgjwt.Service, pool *pgxpool.Pool, lim limi
 	// ── Auth (public; login limited per IP + e-mail and per IP, sign-up per IP) ─
 	authHandler := auth.NewHandler(
 		auth.NewService(authRepo, tokenStore, jwtSvc, cfg.RefreshTokenTTL),
-		auth.CookieOptions{Secure: cfg.CookieSecure, Domain: cfg.CookieDomain, AllowedOrigins: cfg.CORSAllowedOrigins},
+		auth.CookieOptions{Secure: cfg.CookieSecure, Domain: cfg.CookieDomain, PathPrefix: cfg.CookiePathPrefix, AllowedOrigins: cfg.CORSAllowedOrigins},
 	)
 	mux.Handle("POST /auth/login", middleware.LoginLimit(lim.login, lim.loginIP)(authHandler))
 	mux.Handle("POST /auth/register", middleware.IPLimit(lim.register, "too many sign-ups, try again later")(authHandler))

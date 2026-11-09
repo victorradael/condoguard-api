@@ -228,6 +228,33 @@ func TestLogin_Security_CookieFlowKeepsTokensOutOfTheBody(t *testing.T) {
 	}
 }
 
+// Behind a proxy that mounts the API under /api, the browser calls
+// /api/auth/refresh: a Path=/auth cookie would never be sent there.
+func TestLogin_CookiePathPrefixScopesRefreshCookieToProxiedAuthRoutes(t *testing.T) {
+	repo, tokens := auth.NewInMemoryRepository(), auth.NewInMemoryTokenStore()
+	jwtSvc := pkgjwt.MustNewService(secret)
+	h := tenant.Middleware("condo-a")(auth.NewHandler(auth.NewService(repo, tokens, jwtSvc, 0),
+		auth.CookieOptions{Secure: true, PathPrefix: "/api", AllowedOrigins: []string{webOrigin}}))
+	f := &fixture{h: h, repo: repo, jwtSvc: jwtSvc}
+	f.register(t, "pat@example.com")
+
+	rec := f.do(t, "/auth/login", map[string]any{"email": "pat@example.com", "password": goodPass, "useCookies": true}, fromOrigin(webOrigin))
+	refresh := cookie(rec, middleware.RefreshCookie)
+	if rec.Code != http.StatusOK || refresh == nil || refresh.Path != "/api/auth" {
+		t.Fatalf("refresh cookie must be Path=/api/auth: %d %+v", rec.Code, refresh)
+	}
+	if access := cookie(rec, middleware.AccessCookie); access == nil || access.Path != "/" {
+		t.Errorf("access cookie must stay Path=/: %+v", access)
+	}
+
+	// Logout must clear the cookie on the same path, or the browser keeps it.
+	rec = f.do(t, "/auth/logout", nil, fromOrigin(webOrigin), func(r *http.Request) { r.AddCookie(refresh) })
+	cleared := cookie(rec, middleware.RefreshCookie)
+	if rec.Code != http.StatusNoContent || cleared == nil || cleared.Path != "/api/auth" || cleared.MaxAge >= 0 {
+		t.Errorf("logout must expire the cookie at /api/auth: %d %+v", rec.Code, cleared)
+	}
+}
+
 func TestLogin_WrongPasswordOrUnknownUser_Returns401(t *testing.T) {
 	f := newFixture(t)
 	f.register(t, "frank@example.com")
