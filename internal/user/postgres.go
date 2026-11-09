@@ -130,6 +130,18 @@ func (r *postgresRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+func (r *postgresRepository) RevokeSessions(ctx context.Context, id string) error {
+	condoID, err := tenant.CondominiumID(ctx)
+	if err != nil {
+		return err
+	}
+	uid, ok := db.ParseID(id)
+	if !ok {
+		return ErrNotFound
+	}
+	return r.q.RevokeUserRefreshTokens(ctx, dbgen.RevokeUserRefreshTokensParams{CondominiumID: condoID, UserID: uid})
+}
+
 func fromRow(row dbgen.User) *User {
 	return &User{
 		ID:       row.ID.String(),

@@ -95,6 +95,9 @@ func (s *Service) List(ctx context.Context, pg page.Params) (page.Result[*Notifi
 }
 
 // Update applies message and recipient list changes. Admins only.
+// A recipient list present in the body replaces the stored one, even when
+// empty ([] clears it); an absent (or null) list is kept. The notification
+// must still have at least one recipient afterwards.
 func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*Notification, error) {
 	p, err := authz.RequireAdmin(ctx)
 	if err != nil {
@@ -108,11 +111,14 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*No
 	if req.Message != "" {
 		n.Message = req.Message
 	}
-	if len(req.ResidentIDs) > 0 {
+	if req.ResidentIDs != nil {
 		n.ResidentIDs = req.ResidentIDs
 	}
-	if len(req.ShopOwnerIDs) > 0 {
+	if req.ShopOwnerIDs != nil {
 		n.ShopOwnerIDs = req.ShopOwnerIDs
+	}
+	if len(n.ResidentIDs) == 0 && len(n.ShopOwnerIDs) == 0 {
+		return nil, fmt.Errorf("%w: at least one recipient (residentId or shopOwnerId) is required", ErrValidation)
 	}
 
 	if err := s.repo.Update(ctx, n); err != nil {

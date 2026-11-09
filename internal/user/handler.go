@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/victorradael/condoguard/api/internal/authz"
 	"github.com/victorradael/condoguard/api/internal/middleware"
 	"github.com/victorradael/condoguard/api/pkg/page"
 )
@@ -71,7 +72,7 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	users, err := h.svc.List(r.Context(), p)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal error")
+		failed(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, users)
@@ -92,7 +93,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, ErrDuplicate):
 			writeError(w, http.StatusConflict, "email already registered")
 		default:
-			writeError(w, http.StatusInternalServerError, "internal error")
+			failed(w, err)
 		}
 		return
 	}
@@ -129,7 +130,7 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, ErrValidation):
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 		default:
-			writeError(w, http.StatusInternalServerError, "internal error")
+			failed(w, err)
 		}
 		return
 	}
@@ -143,10 +144,20 @@ func (h *handler) delete(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "user not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "internal error")
+		failed(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// failed answers an error the handler has no specific mapping for: the
+// service's authorization errors keep their status, anything else is a 500.
+func failed(w http.ResponseWriter, err error) {
+	if status, msg, ok := authz.Status(err); ok {
+		writeError(w, status, msg)
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "internal error")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

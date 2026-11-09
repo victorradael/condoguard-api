@@ -59,6 +59,10 @@ func (f *fixture) do(t *testing.T, path string, body any, mutate ...func(*http.R
 	return rec
 }
 
+func fromOrigin(origin string) func(*http.Request) {
+	return func(r *http.Request) { r.Header.Set("Origin", origin) }
+}
+
 func (f *fixture) register(t *testing.T, email string) {
 	t.Helper()
 	if rec := f.do(t, "/auth/register", map[string]any{"username": "alice", "email": email, "password": goodPass}); rec.Code != http.StatusCreated {
@@ -199,7 +203,7 @@ func TestLogin_Security_CookieFlowKeepsTokensOutOfTheBody(t *testing.T) {
 	f := newFixture(t)
 	f.register(t, "erin@example.com")
 
-	rec := f.do(t, "/auth/login", map[string]any{"email": "erin@example.com", "password": goodPass, "useCookies": true})
+	rec := f.do(t, "/auth/login", map[string]any{"email": "erin@example.com", "password": goodPass, "useCookies": true}, fromOrigin(webOrigin))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
@@ -305,10 +309,32 @@ func TestLogout_RevokesTheRefreshToken(t *testing.T) {
 	}
 }
 
+// Login CSRF: session cookies are only issued to an allowed origin, so a
+// cross-site form cannot sign the victim's browser into another account.
+func TestLogin_Security_CookieLoginNeedsAllowedOrigin(t *testing.T) {
+	f := newFixture(t)
+	f.register(t, "mallory@example.com")
+	body := map[string]any{"email": "mallory@example.com", "password": goodPass, "useCookies": true}
+
+	for _, origin := range []string{"", "https://evil.example", "null"} {
+		rec := f.do(t, "/auth/login", body, fromOrigin(origin))
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("cookie login from %q: expected 403, got %d", origin, rec.Code)
+		}
+		if len(rec.Result().Cookies()) != 0 {
+			t.Errorf("cookie login from %q must set no cookie", origin)
+		}
+	}
+	// The app flow (tokens in the body, no cookies) needs no Origin.
+	if rec := f.do(t, "/auth/login", map[string]any{"email": "mallory@example.com", "password": goodPass}); rec.Code != http.StatusOK {
+		t.Errorf("app login: expected 200, got %d", rec.Code)
+	}
+}
+
 func TestCookieFlow_RefreshAndLogout(t *testing.T) {
 	f := newFixture(t)
 	f.register(t, "kim@example.com")
-	login := f.do(t, "/auth/login", map[string]any{"email": "kim@example.com", "password": goodPass, "useCookies": true})
+	login := f.do(t, "/auth/login", map[string]any{"email": "kim@example.com", "password": goodPass, "useCookies": true}, fromOrigin(webOrigin))
 	refresh := cookie(login, middleware.RefreshCookie)
 
 	withCookie := func(c *http.Cookie, origin string) func(*http.Request) {

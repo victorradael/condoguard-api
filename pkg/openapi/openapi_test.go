@@ -1,9 +1,12 @@
 package openapi_test
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -213,5 +216,51 @@ func TestHandler_SwaggerUI_Returns200WithHTML(t *testing.T) {
 	}
 	if !strings.Contains(body, "/openapi.json") {
 		t.Error("expected /openapi.json reference in swagger UI HTML")
+	}
+}
+
+// /docs runs on the API origin, where the admin's cookie is valid, so every
+// external file must be pinned and integrity-checked, and the CSP must only
+// allow the exact inline blocks of the page.
+func TestHandler_SwaggerUI_IsLockedDown(t *testing.T) {
+	rec := httptest.NewRecorder()
+	openapi.UIHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/docs", nil))
+	body := rec.Body.String()
+	csp := rec.Header().Get("Content-Security-Policy")
+
+	tags := regexp.MustCompile(`<(script|link)\b[^>]*(src|href)="https?://[^"]*"[^>]*>`).FindAllString(body, -1)
+	if len(tags) != 3 {
+		t.Fatalf("expected 3 external assets, got %d: %v", len(tags), tags)
+	}
+	pinned := regexp.MustCompile(`swagger-ui-dist@\d+\.\d+\.\d+/`)
+	for _, tag := range tags {
+		if !pinned.MatchString(tag) {
+			t.Errorf("asset not pinned to an exact version: %s", tag)
+		}
+		if !regexp.MustCompile(`integrity="sha384-[A-Za-z0-9+/=]{64}"`).MatchString(tag) || !strings.Contains(tag, `crossorigin="anonymous"`) {
+			t.Errorf("asset without SRI: %s", tag)
+		}
+	}
+
+	for _, re := range []string{`<script>([\s\S]*?)</script>`, `<style>([\s\S]*?)</style>`} {
+		for _, m := range regexp.MustCompile(re).FindAllStringSubmatch(body, -1) {
+			sum := sha256.Sum256([]byte(m[1]))
+			if h := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"; !strings.Contains(csp, h) {
+				t.Errorf("inline block not allowed by the CSP (%s): %.40q", h, m[1])
+			}
+		}
+	}
+	for _, want := range []string{"default-src 'none'", "connect-src 'self'", "frame-ancestors 'none'"} {
+		if !strings.Contains(csp, want) {
+			t.Errorf("CSP %q lacks %q", csp, want)
+		}
+	}
+	for _, bad := range []string{"unsafe-inline", "unsafe-eval", "*"} {
+		if strings.Contains(csp, bad) {
+			t.Errorf("CSP must not contain %q: %s", bad, csp)
+		}
+	}
+	if !strings.Contains(body, "persistAuthorization: false") || strings.Contains(body, "persistAuthorization: true") {
+		t.Error("Swagger UI must not persist the bearer token in localStorage")
 	}
 }

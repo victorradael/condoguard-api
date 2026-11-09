@@ -15,6 +15,8 @@ func CORS(allowed []string) func(http.Handler) http.Handler {
 			if ok {
 				w.Header().Set("Access-Control-Allow-Origin", r.Header.Get("Origin"))
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
+				// Lets the web read the 429 back-off and quote the request ID.
+				w.Header().Set("Access-Control-Expose-Headers", "Retry-After, X-Request-Id")
 			}
 
 			// Preflight

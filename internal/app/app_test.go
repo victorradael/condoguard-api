@@ -21,6 +21,7 @@ func clearEnv(t *testing.T) {
 	for _, k := range []string{
 		"DATABASE_URL", "REDIS_URL", "DB_MIGRATE_ON_START", "DEFAULT_CONDOMINIUM_ID",
 		"LOGIN_MAX_ATTEMPTS", "LOGIN_MAX_ATTEMPTS_PER_IP", "LOGIN_LOCKOUT_WINDOW",
+		"REGISTER_MAX_PER_IP", "REGISTER_WINDOW",
 		"ACCESS_TOKEN_TTL", "REFRESH_TOKEN_TTL", "CORS_ALLOWED_ORIGINS",
 		"COOKIE_SECURE", "COOKIE_DOMAIN", "METRICS_TOKEN",
 	} {
@@ -37,6 +38,9 @@ func TestConfigFromEnv_Defaults(t *testing.T) {
 	}
 	if cfg.CondominiumID != "default" || !cfg.MigrateOnStart || cfg.LoginMaxAttempts != 5 || cfg.LoginLockoutWindow != 15*time.Minute {
 		t.Errorf("unexpected defaults: %+v", cfg)
+	}
+	if cfg.RegisterMaxPerIP != 10 || cfg.RegisterWindow != time.Hour {
+		t.Errorf("sign-up limit must be on by default: %+v", cfg)
 	}
 	if !cfg.CookieSecure || cfg.MetricsToken != "" || len(cfg.CORSAllowedOrigins) != 1 || cfg.CORSAllowedOrigins[0] != "http://localhost:3000" {
 		t.Errorf("unexpected security defaults: %+v", cfg)
@@ -92,6 +96,8 @@ func TestConfigFromEnv_Invalid(t *testing.T) {
 		"METRICS_TOKEN":        "short",
 		"ACCESS_TOKEN_TTL":     "-1m",
 		"COOKIE_SECURE":        "perhaps",
+		"REGISTER_MAX_PER_IP":  "0",
+		"REGISTER_WINDOW":      "0s",
 	} {
 		t.Run(k, func(t *testing.T) {
 			clearEnv(t)
@@ -107,6 +113,18 @@ func TestNew_UnreachableDatabase_ReturnsError(t *testing.T) {
 	cfg := app.Config{DatabaseURL: "postgres://nobody@127.0.0.1:1/none?sslmode=disable&connect_timeout=1", JWTSecret: testSecret, CondominiumID: "c", LoginMaxAttempts: 5, LoginLockoutWindow: time.Minute}
 	if _, err := app.New(context.Background(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), middleware.NewMetrics()); err == nil {
 		t.Fatal("expected an error for an unreachable database")
+	}
+}
+
+// A malformed REDIS_URL must not put the Redis password in the startup log.
+func TestNew_Security_InvalidRedisURLHidesPassword(t *testing.T) {
+	cfg := app.Config{RedisURL: "redis://:s3cr3t-pass@host:notaport/0", JWTSecret: testSecret, CondominiumID: "c", LoginMaxAttempts: 5, LoginLockoutWindow: time.Minute}
+	_, err := app.New(context.Background(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), middleware.NewMetrics())
+	if err == nil {
+		t.Fatal("expected an error for a malformed REDIS_URL")
+	}
+	if strings.Contains(err.Error(), "s3cr3t-pass") {
+		t.Errorf("error leaks the Redis password: %v", err)
 	}
 }
 

@@ -50,9 +50,11 @@ com pelo menos 32 bytes, nem com `CORS_ALLOWED_ORIGINS=*`.
 | `LOGIN_MAX_ATTEMPTS` | Falhas de login por IP + e-mail antes do bloqueio | `5` |
 | `LOGIN_MAX_ATTEMPTS_PER_IP` | Falhas de login por IP, somando todos os e-mails | `50` |
 | `LOGIN_LOCKOUT_WINDOW` | Janela do bloqueio (duração Go, ex.: `15m`) | `15m` |
+| `REGISTER_MAX_PER_IP` | Cadastros por IP dentro da janela (freia a enumeração de e-mails) | `10` |
+| `REGISTER_WINDOW` | Janela do limite de cadastro | `1h` |
 | `CORS_ALLOWED_ORIGINS` | Origens do web, separadas por vírgula (`*` é recusado) | `http://localhost:3000` |
 | `COOKIE_SECURE` | Cookies com `Secure`; `false` só em HTTP puro fora de `localhost` | `true` |
-| `COOKIE_DOMAIN` | Domínio dos cookies | host da API |
+| `COOKIE_DOMAIN` | Domínio dos cookies. Com web e API em subdomínios diferentes, use o domínio comum para o `middleware.ts` do web ver a sessão | host da API |
 | `METRICS_TOKEN` | Bearer exigido em `/metrics` (≥ 32 caracteres). Vazio desliga `/metrics` | — |
 | `PORT` | Porta do servidor HTTP | `8080` |
 
@@ -122,7 +124,9 @@ propõe as atualizações.
 
 O contrato completo está em OpenAPI 3.1: `GET /openapi.json` e `GET /docs`
 (Swagger UI) exigem `ROLE_ADMIN`; para gerar tipos no web e no app use
-`go run ./cmd/openapi > openapi.json`.
+`go run ./cmd/openapi > openapi.json`. O Swagger UI vem do CDN numa versão
+exata, com SRI e CSP próprios (`pkg/openapi/handler.go`); ao atualizar a
+versão, troque os hashes juntos.
 
 Toda listagem é paginada: `?page=1&pageSize=20` (máximo 100) e a resposta é
 `{ "items": [...], "page": 1, "pageSize": 20, "total": 42 }`.
@@ -139,8 +143,8 @@ Toda listagem é paginada: `?page=1&pageSize=20` (máximo 100) e a resposta é
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `POST` | `/auth/register` | Cadastro de morador (`username`, `email`, `password`). Senha: ≥ 10 caracteres, letras e números, não comum, sem o e-mail ou o username |
-| `POST` | `/auth/login` | Login por **e-mail**. App: `{ accessToken, refreshToken, roles }`. Web (`"useCookies": true`): tokens só em cookies httpOnly. Após `LOGIN_MAX_ATTEMPTS` falhas responde `429` com `Retry-After` |
+| `POST` | `/auth/register` | Cadastro de morador (`username`, `email`, `password`). Senha: ≥ 10 caracteres, letras e números, não comum, sem o e-mail ou o username. Após `REGISTER_MAX_PER_IP` cadastros na janela responde `429` com `Retry-After` |
+| `POST` | `/auth/login` | Login por **e-mail**. App: `{ accessToken, refreshToken, roles }`. Web (`"useCookies": true`): tokens só em cookies httpOnly, e só para uma origem de `CORS_ALLOWED_ORIGINS` (senão `403`). Após `LOGIN_MAX_ATTEMPTS` falhas responde `429` com `Retry-After` |
 | `POST` | `/auth/refresh` | Troca o refresh token (corpo no app, cookie `cg_refresh` no web) por um novo par; o antigo deixa de valer. Reusar um refresh token já trocado revoga a sessão |
 | `POST` | `/auth/logout` | Revoga o refresh token e apaga os cookies |
 
@@ -152,7 +156,7 @@ Toda listagem é paginada: `?page=1&pageSize=20` (máximo 100) e a resposta é
 | `GET` | `/users` | Listar usuários (`ROLE_ADMIN`) |
 | `GET` | `/users/{id}` | Obter usuário (`ROLE_ADMIN`) |
 | `POST` | `/users` | Criar usuário, inclusive admin (`ROLE_ADMIN`) |
-| `PUT` | `/users/{id}` | Atualizar usuário, e-mail imutável (`ROLE_ADMIN`) |
+| `PUT` | `/users/{id}` | Atualizar usuário, e-mail imutável (`ROLE_ADMIN`). Mudar os `roles` revoga os refresh tokens do usuário |
 | `DELETE` | `/users/{id}` | Remover usuário (`ROLE_ADMIN`) |
 
 ### Residências
@@ -199,7 +203,7 @@ Toda listagem é paginada: `?page=1&pageSize=20` (máximo 100) e a resposta é
 | `GET` | `/notifications` | Listar notificações (o morador vê as endereçadas às suas unidades e lojas) |
 | `GET` | `/notifications/{id}` | Obter notificação, com o estado de leitura do usuário |
 | `POST` | `/notifications` | Criar notificação (`ROLE_ADMIN`); o autor (`createdById`) é sempre o usuário do token |
-| `PUT` | `/notifications/{id}` | Atualizar notificação (`ROLE_ADMIN`) |
+| `PUT` | `/notifications/{id}` | Atualizar notificação (`ROLE_ADMIN`). Uma lista de destinatários presente substitui a atual, mesmo vazia; deve sobrar ao menos um |
 | `DELETE` | `/notifications/{id}` | Remover notificação (`ROLE_ADMIN`) |
 | `PUT` | `/notifications/{id}/read` | Marcar como lida para o próprio usuário (idempotente; cada destinatário tem o seu) |
 

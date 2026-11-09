@@ -163,7 +163,7 @@ func buildSchemas() map[string]*Schema {
 		},
 		"UpdateUserRequest": {
 			Type:        "object",
-			Description: "Apenas username e roles podem ser alterados. E-mail é imutável.",
+			Description: "Apenas username e roles podem ser alterados. E-mail é imutável. Mudar os roles revoga os refresh tokens do usuário.",
 			Properties: map[string]*Schema{
 				"username": str("Novo nome de exibição"),
 				"roles":    roles,
@@ -291,7 +291,8 @@ func buildSchemas() map[string]*Schema {
 			Required: []string{"message"},
 		},
 		"UpdateNotificationRequest": {
-			Type: "object",
+			Type:        "object",
+			Description: "Lista presente substitui a gravada, mesmo vazia ([] limpa); lista ausente é mantida. Deve sobrar ao menos um destinatário.",
 			Properties: map[string]*Schema{
 				"message":      str("Nova mensagem"),
 				"residentIds":  strArr("Novos destinatários (residências)"),

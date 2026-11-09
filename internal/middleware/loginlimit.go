@@ -66,12 +66,12 @@ func LoginLimit(pairLimiter, ipLimiter ratelimit.Limiter) func(http.Handler) htt
 			}
 
 			if retry, locked := byIP.reserve(r); locked {
-				tooMany(w, retry)
+				tooMany(w, retry, "too many login attempts, try again later")
 				return
 			}
 			if retry, locked := pair.reserve(r); locked {
 				byIP.release(r)
-				tooMany(w, retry)
+				tooMany(w, retry, "too many login attempts, try again later")
 				return
 			}
 
@@ -107,7 +107,7 @@ func (v *reservation) reserve(r *http.Request) (retryAfter time.Duration, locked
 	}
 	ok, retry, err := v.limiter.Reserve(r.Context(), v.key)
 	if err != nil {
-		slog.WarnContext(r.Context(), "login limiter unavailable", "error", err)
+		slog.WarnContext(r.Context(), "rate limiter unavailable", "error", err)
 		return 0, false
 	}
 	if !ok {
@@ -131,14 +131,34 @@ func (v *reservation) reset(r *http.Request) {
 
 func logLimiterErr(r *http.Request, err error) {
 	if err != nil {
-		slog.WarnContext(r.Context(), "login limiter unavailable", "error", err)
+		slog.WarnContext(r.Context(), "rate limiter unavailable", "error", err)
 	}
 }
 
-func tooMany(w http.ResponseWriter, retryAfter time.Duration) {
+// IPLimit counts every request per client IP and answers 429 with
+// Retry-After once the IP reached the limiter's maximum in its window. It
+// slows down sign-up abuse such as enumerating registered e-mails. A nil
+// limiter disables it; a failing backend lets the request through.
+func IPLimit(limiter ratelimit.Limiter, msg string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		if limiter == nil {
+			return next
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			byIP := reservation{limiter: limiter, key: clientIP(r)}
+			if retry, locked := byIP.reserve(r); locked {
+				tooMany(w, retry, msg)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func tooMany(w http.ResponseWriter, retryAfter time.Duration, msg string) {
 	secs := max(int(math.Ceil(retryAfter.Seconds())), 1)
 	w.Header().Set("Retry-After", strconv.Itoa(secs))
-	writeJSONError(w, http.StatusTooManyRequests, "too many login attempts, try again later")
+	writeJSONError(w, http.StatusTooManyRequests, msg)
 }
 
 // readLoginEmail reads the body, restores it for the handler and returns

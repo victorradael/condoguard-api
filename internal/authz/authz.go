@@ -52,6 +52,16 @@ type Principal struct {
 // IsAdmin reports whether the caller manages the condominium.
 func (p Principal) IsAdmin() bool { return slices.Contains(p.Roles, RoleAdmin) }
 
+// OperatorID is the caller recorded by AsOperator.
+const OperatorID = "operator"
+
+// AsOperator returns ctx acting as a condominium admin, for trusted tools
+// that already hold database credentials (cmd/createadmin bootstraps the
+// first admin this way). Never call it on a request path.
+func AsOperator(ctx context.Context) context.Context {
+	return middleware.WithIdentity(ctx, OperatorID, []string{RoleAdmin})
+}
+
 // FromContext returns the caller set by the authentication middleware.
 func FromContext(ctx context.Context) (Principal, error) {
 	id := middleware.UserIDFromContext(ctx)

@@ -335,6 +335,28 @@ func TestNotification_Update_ChangesMessage(t *testing.T) {
 	}
 }
 
+// A list present in the body replaces the stored one, even when empty; an
+// absent list is kept. At least one recipient must remain.
+func TestNotification_Update_RecipientLists(t *testing.T) {
+	svc := newService()
+	created := mustCreate(t, svc, notification.CreateRequest{Message: "m", ResidentIDs: []string{"r1"}, ShopOwnerIDs: []string{"s1"}})
+
+	updated, err := svc.Update(adminCtx(), created.ID, notification.UpdateRequest{ShopOwnerIDs: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.ShopOwnerIDs) != 0 || len(updated.ResidentIDs) != 1 {
+		t.Fatalf("[] must clear the shop owners and keep the residents, got %+v", updated)
+	}
+	if stored, _ := svc.GetByID(adminCtx(), created.ID); len(stored.ShopOwnerIDs) != 0 {
+		t.Errorf("cleared list not persisted: %+v", stored)
+	}
+
+	if _, err := svc.Update(adminCtx(), created.ID, notification.UpdateRequest{ResidentIDs: []string{}}); !errors.Is(err, notification.ErrValidation) {
+		t.Errorf("removing the last recipient: expected ErrValidation, got %v", err)
+	}
+}
+
 func TestNotification_Update_NonExistent_ReturnsNotFoundError(t *testing.T) {
 	svc := newService()
 

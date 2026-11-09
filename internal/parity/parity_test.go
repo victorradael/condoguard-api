@@ -29,6 +29,7 @@ import (
 	"github.com/victorradael/condoguard/api/internal/tenant"
 	"github.com/victorradael/condoguard/api/internal/user"
 	pkgjwt "github.com/victorradael/condoguard/api/pkg/jwt"
+	"github.com/victorradael/condoguard/api/pkg/openapi"
 )
 
 const (
@@ -40,6 +41,7 @@ const (
 	condoA       = "condo-a"
 	condoB       = "condo-b"
 	maxAttempts  = 3
+	maxSignUps   = 12
 )
 
 // ── test environment ──────────────────────────────────────────────────────────
@@ -64,6 +66,8 @@ func (e *env) server(condoID string) *httptest.Server {
 		CondominiumID:      condoID,
 		LoginMaxAttempts:   maxAttempts,
 		LoginLockoutWindow: time.Minute,
+		RegisterMaxPerIP:   maxSignUps,
+		RegisterWindow:     time.Minute,
 		JWTSecret:          testSecret,
 		AccessTokenTTL:     5 * time.Minute,
 		RefreshTokenTTL:    time.Hour,
@@ -93,7 +97,7 @@ func (e *env) createAdmin(condoID, email string) {
 		e.t.Fatal(err)
 	}
 	defer pool.Close()
-	_, err = user.NewService(user.NewPostgresRepository(pool)).Create(tenant.WithCondominiumID(ctx, condoID), user.CreateRequest{
+	_, err = user.NewService(user.NewPostgresRepository(pool)).Create(authz.AsOperator(tenant.WithCondominiumID(ctx, condoID)), user.CreateRequest{
 		Username: strings.Split(email, "@")[0],
 		Email:    email,
 		Password: password,
@@ -427,6 +431,9 @@ func TestSecurity6_CORS(t *testing.T) {
 
 	ok := preflight(webOrigin)
 	expect(t, ok, http.StatusNoContent, "preflight from the web origin")
+	if got := ok.Header.Get("Access-Control-Expose-Headers"); !strings.Contains(got, "Retry-After") {
+		t.Errorf("the web must be able to read Retry-After, got Expose-Headers %q", got)
+	}
 	if ok.Header.Get("Access-Control-Allow-Origin") != webOrigin || ok.Header.Get("Access-Control-Allow-Credentials") != "true" {
 		t.Errorf("allowed origin must be echoed with credentials, got %q", ok.Header.Get("Access-Control-Allow-Origin"))
 	}
@@ -474,6 +481,21 @@ func TestSecurity7_LoginAndInputLimits(t *testing.T) {
 	expect(t, do(t, srv, req{method: http.MethodPost, path: "/auth/login", body: map[string]any{"email": "ana@exemplo.test", "password": password}}),
 		http.StatusTooManyRequests, "login after max failures")
 
+	// Sign-ups are limited per IP, which slows down e-mail enumeration (409).
+	// Every attempt counts: ana, the duplicate and the 4 weak passwords above.
+	for i := 2 + 4; i < maxSignUps; i++ {
+		do(t, srv, req{method: http.MethodPost, path: "/auth/register", body: map[string]any{
+			"username": "probe", "email": "ana@exemplo.test", "password": password,
+		}})
+	}
+	limited := do(t, srv, req{method: http.MethodPost, path: "/auth/register", body: map[string]any{
+		"username": "late", "email": "late@exemplo.test", "password": password,
+	}})
+	expect(t, limited, http.StatusTooManyRequests, "sign-up after the per-IP limit")
+	if limited.Header.Get("Retry-After") == "" {
+		t.Error("429 must carry Retry-After")
+	}
+
 	// Bodies above the limit are refused before they are parsed.
 	huge := `{"username":"x","email":"x@exemplo.test","password":"` + strings.Repeat("a", int(middleware.DefaultMaxBodyBytes)) + `"}`
 	expect(t, do(t, srv, req{method: http.MethodPost, path: "/auth/register", rawBody: strings.NewReader(huge)}),
@@ -491,6 +513,17 @@ func TestSecurity8_CookieFlow(t *testing.T) {
 	}})
 	expect(t, resp, http.StatusOK, "cookie login")
 	access, refresh := cookie(resp, middleware.AccessCookie), cookie(resp, middleware.RefreshCookie)
+
+	// Login CSRF: another site can't sign the browser into an account.
+	for _, origin := range []string{"", evilOrigin} {
+		csrf := do(t, srv, req{method: http.MethodPost, path: "/auth/login", origin: origin, body: map[string]any{
+			"email": "ana@exemplo.test", "password": password, "useCookies": true,
+		}})
+		expect(t, csrf, http.StatusForbidden, "cookie login from origin "+origin)
+		if len(csrf.Cookies()) != 0 {
+			t.Errorf("cookie login from %q must set no cookie", origin)
+		}
+	}
 	if access == nil || refresh == nil || !access.HttpOnly || !refresh.HttpOnly {
 		t.Fatalf("login must set httpOnly %s and %s cookies", middleware.AccessCookie, middleware.RefreshCookie)
 	}
@@ -548,6 +581,31 @@ func TestSecurity8_AppFlow_BearerAndRefreshInBody(t *testing.T) {
 	expect(t, resp, http.StatusOK, "app refresh")
 	tok, _ := decode(t, resp)["accessToken"].(string)
 	expect(t, do(t, srv, req{method: http.MethodGet, path: "/users/me", token: tok}), http.StatusOK, "me with refreshed bearer")
+}
+
+// Changing a user's roles revokes their refresh tokens: the old roles can't be
+// carried into a new access token.
+func TestSecurity8_RoleChangeRevokesRefreshTokens(t *testing.T) {
+	e := newEnv(t)
+	srv := e.server(condoA)
+	admin := adminToken(t, e, srv, condoA)
+	register(t, srv, "ana", "ana@exemplo.test")
+
+	resp := do(t, srv, req{method: http.MethodPost, path: "/auth/login", body: map[string]any{"email": "ana@exemplo.test", "password": password}})
+	expect(t, resp, http.StatusOK, "login")
+	body := decode(t, resp)
+	rt, _ := body["refreshToken"].(string)
+	me := do(t, srv, req{method: http.MethodGet, path: "/users/me", token: body["accessToken"].(string)})
+	id, _ := decode(t, me)["id"].(string)
+
+	// Renaming keeps the session.
+	expect(t, do(t, srv, req{method: http.MethodPut, path: "/users/" + id, token: admin, body: map[string]any{"username": "ana2"}}), http.StatusOK, "rename")
+	resp = do(t, srv, req{method: http.MethodPost, path: "/auth/refresh", body: map[string]any{"refreshToken": rt}})
+	expect(t, resp, http.StatusOK, "refresh after rename")
+	rt, _ = decode(t, resp)["refreshToken"].(string)
+
+	expect(t, do(t, srv, req{method: http.MethodPut, path: "/users/" + id, token: admin, body: map[string]any{"roles": []string{"ROLE_ADMIN"}}}), http.StatusOK, "promote")
+	expect(t, do(t, srv, req{method: http.MethodPost, path: "/auth/refresh", body: map[string]any{"refreshToken": rt}}), http.StatusUnauthorized, "refresh after role change")
 }
 
 // ── Web ↔ API contract ───────────────────────────────────────────────────────
@@ -610,5 +668,38 @@ func TestContract_AllResponses_HaveRequestIDHeader(t *testing.T) {
 		if resp := do(t, srv, req{method: http.MethodGet, path: path}); resp.Header.Get("X-Request-Id") == "" {
 			t.Errorf("path %s: expected X-Request-Id header", path)
 		}
+	}
+}
+
+func TestContract_SecurityHeaders(t *testing.T) {
+	e := newEnv(t)
+	srv := e.server(condoA)
+	admin := adminToken(t, e, srv, condoA)
+
+	health := do(t, srv, req{method: http.MethodGet, path: "/health"})
+	if got := health.Header.Get("Content-Security-Policy"); got != middleware.APIContentSecurityPolicy {
+		t.Errorf("API CSP = %q", got)
+	}
+	if health.Header.Get("Strict-Transport-Security") == "" {
+		t.Error("expected HSTS")
+	}
+
+	// /docs gets its own CSP: only the pinned Swagger UI files, no inline code but its own.
+	docs := do(t, srv, req{method: http.MethodGet, path: "/docs", token: admin})
+	expect(t, docs, http.StatusOK, "/docs as admin")
+	if got := docs.Header.Get("Content-Security-Policy"); got != openapi.SwaggerUICSP {
+		t.Errorf("/docs CSP = %q", got)
+	}
+
+	// A forged request ID is replaced, not echoed into the logs.
+	r, _ := http.NewRequest(http.MethodGet, srv.URL+"/health", nil)
+	r.Header.Set("X-Request-Id", "forged id\twith tabs")
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if got := resp.Header.Get("X-Request-Id"); got == "" || strings.Contains(got, " ") {
+		t.Errorf("forged X-Request-Id must be replaced, got %q", got)
 	}
 }

@@ -46,6 +46,10 @@ func TestCORS_AllowedOriginIsEchoedWithCredentials(t *testing.T) {
 	if !strings.Contains(rec.Header().Get("Vary"), "Origin") {
 		t.Error("expected Vary: Origin")
 	}
+	// The web reads Retry-After on 429 and quotes the request ID in errors.
+	if got := rec.Header().Get("Access-Control-Expose-Headers"); got != "Retry-After, X-Request-Id" {
+		t.Errorf("Expose-Headers = %q", got)
+	}
 }
 
 // An origin outside the list never gets CORS headers, and the response is
@@ -60,6 +64,9 @@ func TestCORS_OtherOriginGetsNoHeaders(t *testing.T) {
 		}
 		if v := rec.Header().Get("Access-Control-Allow-Credentials"); v != "" {
 			t.Errorf("%q: Allow-Credentials = %q, want none", origin, v)
+		}
+		if v := rec.Header().Get("Access-Control-Expose-Headers"); v != "" {
+			t.Errorf("%q: Expose-Headers = %q, want none", origin, v)
 		}
 	}
 }
@@ -122,6 +129,8 @@ func TestSecurityHeaders(t *testing.T) {
 	middleware.SecurityHeaders(protectedHandler()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	for h, want := range map[string]string{
 		"X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Cache-Control": "no-store",
+		"Content-Security-Policy":   "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+		"Strict-Transport-Security": "max-age=31536000",
 	} {
 		if got := rec.Header().Get(h); got != want {
 			t.Errorf("%s = %q, want %q", h, got, want)

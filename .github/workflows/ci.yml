@@ -18,7 +18,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
         ports:
           - 5432:5432
         env:
@@ -31,7 +31,7 @@ jobs:
           --health-retries 20
       # No password on purpose: ephemeral CI service, reachable only by this job.
       redis:
-        image: redis:7-alpine
+        image: redis:7-alpine@sha256:c5d34a98396a4775e223c74e929162c35c5a2182901ba26b50ade939941ce14b
         ports:
           - 6379:6379
         options: >-

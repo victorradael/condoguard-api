@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"expvar"
 	"fmt"
 	"log/slog"
@@ -39,6 +40,8 @@ type Config struct {
 	LoginMaxAttempts      int           // LOGIN_MAX_ATTEMPTS per IP + e-mail (default 5)
 	LoginMaxAttemptsPerIP int           // LOGIN_MAX_ATTEMPTS_PER_IP across e-mails (default 50)
 	LoginLockoutWindow    time.Duration // LOGIN_LOCKOUT_WINDOW (default 15m)
+	RegisterMaxPerIP      int           // REGISTER_MAX_PER_IP sign-ups per IP and window (default 10; 0 in Config disables)
+	RegisterWindow        time.Duration // REGISTER_WINDOW (default 1h)
 	JWTSecret             string        // JWT_SECRET_KEY (required): Base64 of >= 32 random bytes
 	AccessTokenTTL        time.Duration // ACCESS_TOKEN_TTL (default 15m)
 	RefreshTokenTTL       time.Duration // REFRESH_TOKEN_TTL (default 720h)
@@ -60,6 +63,8 @@ func ConfigFromEnv() (Config, error) {
 		LoginMaxAttempts:      5,
 		LoginMaxAttemptsPerIP: 50,
 		LoginLockoutWindow:    15 * time.Minute,
+		RegisterMaxPerIP:      10,
+		RegisterWindow:        time.Hour,
 		JWTSecret:             os.Getenv("JWT_SECRET_KEY"),
 		AccessTokenTTL:        pkgjwt.DefaultExpiry,
 		RefreshTokenTTL:       auth.DefaultRefreshTTL,
@@ -97,7 +102,7 @@ func ConfigFromEnv() (Config, error) {
 	for _, n := range []struct {
 		env string
 		dst *int
-	}{{"LOGIN_MAX_ATTEMPTS", &cfg.LoginMaxAttempts}, {"LOGIN_MAX_ATTEMPTS_PER_IP", &cfg.LoginMaxAttemptsPerIP}} {
+	}{{"LOGIN_MAX_ATTEMPTS", &cfg.LoginMaxAttempts}, {"LOGIN_MAX_ATTEMPTS_PER_IP", &cfg.LoginMaxAttemptsPerIP}, {"REGISTER_MAX_PER_IP", &cfg.RegisterMaxPerIP}} {
 		if v := os.Getenv(n.env); v != "" {
 			i, err := strconv.Atoi(v)
 			if err != nil || i < 1 {
@@ -109,7 +114,7 @@ func ConfigFromEnv() (Config, error) {
 	for _, d := range []struct {
 		env string
 		dst *time.Duration
-	}{{"LOGIN_LOCKOUT_WINDOW", &cfg.LoginLockoutWindow}, {"ACCESS_TOKEN_TTL", &cfg.AccessTokenTTL}, {"REFRESH_TOKEN_TTL", &cfg.RefreshTokenTTL}} {
+	}{{"LOGIN_LOCKOUT_WINDOW", &cfg.LoginLockoutWindow}, {"REGISTER_WINDOW", &cfg.RegisterWindow}, {"ACCESS_TOKEN_TTL", &cfg.AccessTokenTTL}, {"REFRESH_TOKEN_TTL", &cfg.RefreshTokenTTL}} {
 		if v := os.Getenv(d.env); v != "" {
 			t, err := time.ParseDuration(v)
 			if err != nil || t <= 0 {
@@ -172,12 +177,14 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger, metrics *middlewa
 		slog.Warn("DATABASE_URL not set — using in-memory repositories (not for production)")
 	}
 
-	var limiter, ipLimiter ratelimit.Limiter
+	var limiter, ipLimiter, registerLimiter ratelimit.Limiter
+	registerOn := cfg.RegisterMaxPerIP > 0 && cfg.RegisterWindow > 0
 	if cfg.RedisURL != "" {
 		opts, err := redis.ParseURL(cfg.RedisURL)
 		if err != nil {
+			// The parse error quotes the URL, password included: keep it out of the log.
 			a.Close()
-			return nil, fmt.Errorf("REDIS_URL: %w", err)
+			return nil, errors.New("REDIS_URL: invalid URL")
 		}
 		a.redis = redis.NewClient(opts)
 		if err := a.redis.Ping(ctx).Err(); err != nil {
@@ -188,15 +195,21 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger, metrics *middlewa
 		if cfg.LoginMaxAttemptsPerIP > 0 {
 			ipLimiter = ratelimit.NewRedis(a.redis, "condoguard:login-ip:", cfg.LoginMaxAttemptsPerIP, cfg.LoginLockoutWindow)
 		}
+		if registerOn {
+			registerLimiter = ratelimit.NewRedis(a.redis, "condoguard:register-ip:", cfg.RegisterMaxPerIP, cfg.RegisterWindow)
+		}
 	} else {
 		slog.Warn("REDIS_URL not set — login attempt limit kept in process memory (single instance only)")
 		limiter = ratelimit.NewMemory(cfg.LoginMaxAttempts, cfg.LoginLockoutWindow)
 		if cfg.LoginMaxAttemptsPerIP > 0 {
 			ipLimiter = ratelimit.NewMemory(cfg.LoginMaxAttemptsPerIP, cfg.LoginLockoutWindow)
 		}
+		if registerOn {
+			registerLimiter = ratelimit.NewMemory(cfg.RegisterMaxPerIP, cfg.RegisterWindow)
+		}
 	}
 
-	a.Handler = newHandler(cfg, jwtSvc, a.pool, limiter, ipLimiter, logger, metrics)
+	a.Handler = newHandler(cfg, jwtSvc, a.pool, limiters{login: limiter, loginIP: ipLimiter, register: registerLimiter}, logger, metrics)
 	return a, nil
 }
 
@@ -219,7 +232,12 @@ func NewRouter(logger *slog.Logger, metrics *middleware.Metrics) http.Handler {
 
 // newHandler wires all domain routes and the global middleware stack:
 // SecurityHeaders → CORS → RequestID → Logging → Metrics → MaxBody → Tenant → mux.
-func newHandler(cfg Config, jwtSvc *pkgjwt.Service, pool *pgxpool.Pool, limiter, ipLimiter ratelimit.Limiter, logger *slog.Logger, metrics *middleware.Metrics) http.Handler {
+// limiters are the request limiters of the public auth routes; nil = off.
+type limiters struct {
+	login, loginIP, register ratelimit.Limiter
+}
+
+func newHandler(cfg Config, jwtSvc *pkgjwt.Service, pool *pgxpool.Pool, lim limiters, logger *slog.Logger, metrics *middleware.Metrics) http.Handler {
 	mux := http.NewServeMux()
 	authMW := middleware.Authenticate(jwtSvc, cfg.CORSAllowedOrigins...)
 	adminOnly := func(h http.Handler) http.Handler {
@@ -278,12 +296,13 @@ func newHandler(cfg Config, jwtSvc *pkgjwt.Service, pool *pgxpool.Pool, limiter,
 		return authz.Units{ResidentIDs: rids, ShopOwnerIDs: sids}, nil
 	})
 
-	// ── Auth (public; login limited per IP + e-mail and per IP) ────────────────
+	// ── Auth (public; login limited per IP + e-mail and per IP, sign-up per IP) ─
 	authHandler := auth.NewHandler(
 		auth.NewService(authRepo, tokenStore, jwtSvc, cfg.RefreshTokenTTL),
 		auth.CookieOptions{Secure: cfg.CookieSecure, Domain: cfg.CookieDomain, AllowedOrigins: cfg.CORSAllowedOrigins},
 	)
-	mux.Handle("POST /auth/login", middleware.LoginLimit(limiter, ipLimiter)(authHandler))
+	mux.Handle("POST /auth/login", middleware.LoginLimit(lim.login, lim.loginIP)(authHandler))
+	mux.Handle("POST /auth/register", middleware.IPLimit(lim.register, "too many sign-ups, try again later")(authHandler))
 	mux.Handle("/auth/", authHandler)
 
 	// ── Users (/users/me: any user; the rest: ROLE_ADMIN) ──────────────────────

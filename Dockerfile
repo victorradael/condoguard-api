@@ -1,5 +1,5 @@
 # -- Build Stage --
-FROM golang:1.26.10-alpine3.24 AS builder
+FROM golang:1.26.10-alpine3.24@sha256:87c65a688975c0b1d4585d204874c45ca78354670e3a5f11368c5a492303d696 AS builder
 
 WORKDIR /src
 
@@ -16,7 +16,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/condogu
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/condoguard-createadmin ./cmd/createadmin
 
 # -- Final Stage --
-FROM alpine:3.24
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 
 # Certificados CA (TLS para PostgreSQL/Redis fora do host) e usuário sem privilégios
 RUN apk --no-cache add ca-certificates && \

@@ -645,7 +645,12 @@ func TestIntegration_Users_CRUD(t *testing.T) {
 }
 
 func TestHandler_Security_OtherCondominiumCannotAccessUsers(t *testing.T) {
-	router := newPostgresRouter(t)
+	t.Run("memory", func(t *testing.T) { otherCondominiumCannotAccessUsers(t, newTestRouter(t)) })
+	t.Run("postgres", func(t *testing.T) { otherCondominiumCannotAccessUsers(t, newPostgresRouter(t)) })
+}
+
+func otherCondominiumCannotAccessUsers(t *testing.T, router http.Handler) {
+	t.Helper()
 	tokA := adminToken(t)
 	tokB := tokenFor(t, "admin-b", condoB, "ROLE_ADMIN")
 

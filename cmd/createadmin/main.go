@@ -63,7 +63,7 @@ func run() error {
 	}
 	defer pool.Close()
 
-	ctx = tenant.WithCondominiumID(ctx, condoID)
+	ctx = authz.AsOperator(tenant.WithCondominiumID(ctx, condoID))
 	u, err := user.NewService(user.NewPostgresRepository(pool)).Create(ctx, user.CreateRequest{
 		Username: username,
 		Email:    email,

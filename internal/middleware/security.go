@@ -27,6 +27,15 @@ func MaxBody(limit int64) func(http.Handler) http.Handler {
 	}
 }
 
+// APIContentSecurityPolicy is the CSP of every API answer: JSON never loads
+// anything nor gets framed. Handlers that serve a page (/docs) override it.
+const APIContentSecurityPolicy = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+
+// HSTS keeps browsers on HTTPS for a year once they saw the API over HTTPS
+// (browsers ignore it on plain HTTP, so local development is unaffected).
+// Subdomains are not included: they are not all owned by the API.
+const HSTS = "max-age=31536000"
+
 // SecurityHeaders sets the response headers every API answer should carry.
 // Responses are user data: they must not be cached by shared caches or
 // sniffed into another content type, and the API is never framed.
@@ -37,6 +46,8 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Cache-Control", "no-store")
+		h.Set("Content-Security-Policy", APIContentSecurityPolicy)
+		h.Set("Strict-Transport-Security", HSTS)
 		next.ServeHTTP(w, r)
 	})
 }

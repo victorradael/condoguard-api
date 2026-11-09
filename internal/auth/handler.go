@@ -18,8 +18,8 @@ type CookieOptions struct {
 	Secure bool
 	// Domain is the cookie domain; empty means the API host only.
 	Domain string
-	// AllowedOrigins are the browser origins allowed to refresh or log out
-	// with the cookie (CSRF protection).
+	// AllowedOrigins are the browser origins allowed to log in, refresh or
+	// log out with the cookie (CSRF protection).
 	AllowedOrigins []string
 }
 
@@ -67,6 +67,12 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	// Login CSRF: a cross-site form could otherwise sign the victim's browser
+	// into the attacker's account. Only allowed origins get session cookies.
+	if req.UseCookies && !middleware.CheckCookieOrigin(r, h.cookies.AllowedOrigins) {
+		writeError(w, http.StatusForbidden, "origin not allowed")
 		return
 	}
 
