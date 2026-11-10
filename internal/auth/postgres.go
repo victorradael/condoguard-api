@@ -36,7 +36,7 @@ func (r *postgresRepository) Save(ctx context.Context, user *User) error {
 	}
 	id := uuid.New()
 	err = db.InTx(ctx, r.pool, func(ctx context.Context) error {
-		if err := r.q.InsertUser(ctx, dbgen.InsertUserParams{ID: id, Username: user.Username, Email: user.Email, PasswordHash: user.Password}); err != nil {
+		if err = r.q.InsertUser(ctx, dbgen.InsertUserParams{ID: id, Username: user.Username, Email: user.Email, PasswordHash: user.Password}); err != nil {
 			return err
 		}
 		return r.q.InsertMembership(ctx, dbgen.InsertMembershipParams{UserID: id, CondominiumID: condoID, Roles: roles})

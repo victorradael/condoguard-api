@@ -105,14 +105,14 @@ func NewEnv(t testing.TB) *Env {
 	// Registered before NewDatabase so that, cleanups being LIFO, the role is
 	// dropped after the database (and so owns and holds nothing).
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		c, err := pgx.Connect(ctx, adminURL)
+		c, err := pgx.Connect(cctx, adminURL)
 		if err != nil {
 			return
 		}
 		defer func() { _ = c.Close(context.Background()) }()
-		_, _ = c.Exec(ctx, "DROP ROLE IF EXISTS "+role)
+		_, _ = c.Exec(cctx, "DROP ROLE IF EXISTS "+role)
 	})
 	dbURL := NewDatabase(t)
 
@@ -121,7 +121,7 @@ func NewEnv(t testing.TB) *Env {
 		t.Fatalf("dbtest: %v", err)
 	}
 	t.Cleanup(admin.Close)
-	if err := db.MigrateUp(ctx, admin); err != nil {
+	if err = db.MigrateUp(ctx, admin); err != nil {
 		t.Fatalf("dbtest: %v", err)
 	}
 
@@ -137,7 +137,7 @@ func NewEnv(t testing.TB) *Env {
 		"GRANT EXECUTE ON FUNCTION auth_user_by_email(text), auth_memberships(uuid), auth_refresh_condominium(bytea), condominium_lookup(text), remove_membership(uuid), " +
 			"account_token_issue(uuid, text, bytea, timestamptz), account_token_issue_for_member(uuid, text, bytea, timestamptz, uuid), account_token_peek(bytea, text), account_verify_email(bytea), account_reset_password(bytea, text), revoke_user_sessions(uuid) TO " + role,
 	} {
-		if _, err := admin.Exec(ctx, q); err != nil {
+		if _, err = admin.Exec(ctx, q); err != nil {
 			t.Fatalf("dbtest: %s: %v", q, err)
 		}
 	}

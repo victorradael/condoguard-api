@@ -51,7 +51,7 @@ func (h *Handler) twoFactor(next func(w http.ResponseWriter, r *http.Request, id
 		var req struct {
 			MFAToken string `json:"mfaToken"`
 		}
-		if err := json.Unmarshal(body, &req); err != nil {
+		if err = json.Unmarshal(body, &req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON")
 			return
 		}

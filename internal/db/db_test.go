@@ -137,10 +137,10 @@ func TestMigration00003_KeepsTheDataOf1a(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	if err := db.MigrateUp(ctx, pool); err != nil {
+	if err = db.MigrateUp(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.MigrateDownTo(ctx, pool, 2); err != nil {
+	if err = db.MigrateDownTo(ctx, pool, 2); err != nil {
 		t.Fatalf("down to 1a: %v", err)
 	}
 
@@ -152,7 +152,7 @@ func TestMigration00003_KeepsTheDataOf1a(t *testing.T) {
 		`INSERT INTO residents (condominium_id, condominium_ref, unit_number, owner_id) VALUES ('default', 'b1', '101', 'x'), ('outro', 'b1', '101', 'y')`,
 		`INSERT INTO expenses (condominium_id, description, amount_cents, due_date) VALUES ('default', 'Água', 1, now())`,
 	} {
-		if _, err := pool.Exec(ctx, q); err != nil {
+		if _, err = pool.Exec(ctx, q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}

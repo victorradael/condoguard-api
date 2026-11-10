@@ -69,7 +69,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Notification,
 	}
 
 	err = s.trail.Atomic(ctx, func(ctx context.Context) (audit.Entry, error) {
-		if err := s.repo.Save(ctx, n); err != nil {
+		if err = s.repo.Save(ctx, n); err != nil {
 			return audit.Entry{}, err
 		}
 		return audit.Entry{Action: audit.ActionCreate, Resource: auditResource, ResourceID: n.ID, After: n}, nil
@@ -139,7 +139,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*No
 	}
 
 	err = s.trail.Atomic(ctx, func(ctx context.Context) (audit.Entry, error) {
-		if err := s.repo.Update(ctx, n); err != nil {
+		if err = s.repo.Update(ctx, n); err != nil {
 			return audit.Entry{}, err
 		}
 		return audit.Entry{Action: audit.ActionUpdate, Resource: auditResource, ResourceID: n.ID, Before: before, After: n}, nil

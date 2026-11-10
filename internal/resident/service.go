@@ -113,9 +113,9 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*Re
 
 	// Check uniqueness only when the unit number is actually changing.
 	if req.UnitNumber != "" && req.UnitNumber != res.UnitNumber {
-		exists, err := s.repo.ExistsUnit(ctx, res.CondominiumID, req.UnitNumber, id)
-		if err != nil {
-			return nil, err
+		exists, xerr := s.repo.ExistsUnit(ctx, res.CondominiumID, req.UnitNumber, id)
+		if xerr != nil {
+			return nil, xerr
 		}
 		if exists {
 			return nil, ErrDuplicate

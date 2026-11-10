@@ -248,9 +248,9 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger, metrics *middlewa
 	}
 
 	if cfg.DatabaseURL != "" {
-		pool, err := db.NewPool(ctx, cfg.DatabaseURL)
-		if err != nil {
-			return nil, err
+		pool, derr := db.NewPool(ctx, cfg.DatabaseURL)
+		if derr != nil {
+			return nil, derr
 		}
 		a.pool = pool
 		if cfg.MigrateOnStart {
@@ -267,8 +267,8 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger, metrics *middlewa
 	var revoked middleware.Revocations
 	registerOn := cfg.RegisterMaxPerIP > 0 && cfg.RegisterWindow > 0
 	if cfg.RedisURL != "" {
-		opts, err := redis.ParseURL(cfg.RedisURL)
-		if err != nil {
+		opts, rerr := redis.ParseURL(cfg.RedisURL)
+		if rerr != nil {
 			// The parse error quotes the URL, password included: keep it out of the log.
 			a.Close()
 			return nil, errors.New("REDIS_URL: invalid URL")
@@ -304,10 +304,10 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger, metrics *middlewa
 
 	if a.pool != nil {
 		// The default condominium may be given by name; the database knows its id.
-		id, found, err := condominium.NewPostgresRepository(a.pool).Lookup(ctx, cfg.CondominiumID)
-		if err != nil {
+		id, found, lerr := condominium.NewPostgresRepository(a.pool).Lookup(ctx, cfg.CondominiumID)
+		if lerr != nil {
 			a.Close()
-			return nil, fmt.Errorf("DEFAULT_CONDOMINIUM_ID: %w", err)
+			return nil, fmt.Errorf("DEFAULT_CONDOMINIUM_ID: %w", lerr)
 		}
 		cfg.CondominiumID = id
 		if !found {

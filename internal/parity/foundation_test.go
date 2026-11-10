@@ -247,11 +247,11 @@ func TestMemberships_RolesPerCondominium(t *testing.T) {
 	expect(t, resp, http.StatusUnauthorized, "wrong password")
 
 	loginTo := func(condo string) (string, int) {
-		resp := do(t, srv, req{method: http.MethodPost, path: "/auth/login", body: map[string]any{"email": "maria@exemplo.test", "password": password, "condominiumId": condo}})
-		if resp.StatusCode != http.StatusOK {
-			return "", resp.StatusCode
+		lr := do(t, srv, req{method: http.MethodPost, path: "/auth/login", body: map[string]any{"email": "maria@exemplo.test", "password": password, "condominiumId": condo}})
+		if lr.StatusCode != http.StatusOK {
+			return "", lr.StatusCode
 		}
-		return decode(t, resp)["accessToken"].(string), resp.StatusCode
+		return decode(t, lr)["accessToken"].(string), lr.StatusCode
 	}
 	inA, _ := loginTo(condoA)
 	inB, _ := loginTo(condoB)
@@ -266,9 +266,9 @@ func TestMemberships_RolesPerCondominium(t *testing.T) {
 		t.Errorf("Maria is síndica in B: GET /users got %d, want 200", got)
 	}
 	for tok, want := range map[string]string{inA: condoA, inB: condoB} {
-		resp := do(t, srv, req{method: http.MethodGet, path: "/condominium", token: tok})
-		expect(t, resp, http.StatusOK, "current condominium")
-		if id := decode(t, resp)["id"]; id != want {
+		vr := do(t, srv, req{method: http.MethodGet, path: "/condominium", token: tok})
+		expect(t, vr, http.StatusOK, "current condominium")
+		if id := decode(t, vr)["id"]; id != want {
 			t.Errorf("session in %s reports %v", want, id)
 		}
 	}
