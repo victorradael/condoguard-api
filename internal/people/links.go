@@ -280,6 +280,10 @@ func (s *Service) EndLink(ctx context.Context, linkID string, req EndLinkRequest
 			if end.Before(today) {
 				return audit.Entry{}, validationf("endsOn cannot be in the past")
 			}
+			// A scheduled end can be brought forward, never pushed back.
+			if before.EndsOn != nil && end.After(*before.EndsOn) {
+				return audit.Entry{}, validationf("endsOn cannot postpone a scheduled end")
+			}
 		}
 		if !end.After(before.StartsOn) {
 			return audit.Entry{}, validationf("endsOn must be after the start of the link (%s)", civil.Format(before.StartsOn))

@@ -63,6 +63,24 @@ func TestQA_ResponsibleCannotReopenOrBackdateLinks(t *testing.T) {
 		}
 	})
 
+	t.Run("postpone", func(t *testing.T) {
+		// The síndico schedules Dino's departure a week from now.
+		dino := f.person("Dino Lima", cpfCaio, "dino@exemplo.test")
+		dinoLink := id(f.link(f.unit1, dino, "morador"))
+		soon := time.Now().AddDate(0, 0, 7).Format("2006-01-02")
+		s.call("PUT", "/links/"+dinoLink+"/end", map[string]any{"endsOn": soon}, http.StatusOK)
+		if st := anaAPI.status("PUT", "/links/"+dinoLink+"/end", map[string]any{"endsOn": "2199-01-01"}); st == http.StatusOK {
+			t.Errorf("the responsible resident postponed a scheduled end (status %d)", st)
+		}
+		for _, l := range s.items("/units/" + f.unit1 + "/links") {
+			if id(l) == dinoLink && l["endsOn"] != soon {
+				t.Errorf("the scheduled end moved: %v", l["endsOn"])
+			}
+		}
+		// Bringing it forward is fine.
+		anaAPI.call("PUT", "/links/"+dinoLink+"/end", map[string]any{"endsOn": time.Now().AddDate(0, 0, 3).Format("2006-01-02")}, http.StatusOK)
+	})
+
 	t.Run("backdate", func(t *testing.T) {
 		cleo := anaAPI.call("POST", "/units/"+f.unit1+"/links", map[string]any{"kind": "morador", "startsOn": "2020-01-01",
 			"person": map[string]any{"fullName": "Cleo Souza"}}, http.StatusCreated)
@@ -208,6 +226,17 @@ func TestQA_InputHardening(t *testing.T) {
 	}
 	if st := s.status("POST", "/blocks", map[string]any{"name": "Torre\x00"}); st >= 500 || st < 400 {
 		t.Errorf("NUL in a block name: %d", st)
+	}
+	for name, body := range map[string]map[string]any{
+		"NUL in the unit number":   {"unitNumber": "10\x001", "blockId": f.block},
+		"bad UTF-8 in unit number": {"unitNumber": "10\xff1", "blockId": f.block},
+	} {
+		if st := s.status("POST", "/units", body); st != http.StatusUnprocessableEntity {
+			t.Errorf("create: %s: %d", name, st)
+		}
+		if st := s.status("PUT", "/units/"+f.unit1, body); st != http.StatusUnprocessableEntity {
+			t.Errorf("update: %s: %d", name, st)
+		}
 	}
 	for _, q := range []string{"%", "_", "' OR '1'='1", `\`, "Ana%' --", "%%%%"} {
 		got := s.call("GET", "/people?q="+urlQuery(q), nil, http.StatusOK)

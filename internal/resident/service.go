@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/victorradael/condoguard/api/internal/audit"
 	"github.com/victorradael/condoguard/api/internal/authz"
@@ -46,6 +48,9 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Resident, err
 	}
 	if len(req.UnitNumber) > maxUnitNumber {
 		return nil, fmt.Errorf("%w: unitNumber is too long", ErrValidation)
+	}
+	if !cleanText(req.UnitNumber) {
+		return nil, fmt.Errorf("%w: unitNumber has invalid characters", ErrValidation)
 	}
 	if req.BlockID != "" && !validID(req.BlockID) {
 		return nil, fmt.Errorf("%w: blockId is invalid", ErrValidation)
@@ -145,6 +150,9 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*Re
 		if len(req.UnitNumber) > maxUnitNumber {
 			return nil, fmt.Errorf("%w: unitNumber is too long", ErrValidation)
 		}
+		if !cleanText(req.UnitNumber) {
+			return nil, fmt.Errorf("%w: unitNumber has invalid characters", ErrValidation)
+		}
 		newNumber = req.UnitNumber
 	}
 	// Check uniqueness only when the place of the unit is actually changing.
@@ -199,5 +207,9 @@ func (s *Service) UnitIDsOwnedBy(ctx context.Context, userID string) ([]string, 
 
 // maxUnitNumber bounds the free-text unit number ("101", "Cobertura 2", "Loja 3").
 const maxUnitNumber = 40
+
+// cleanText reports whether s is valid UTF-8 without NUL (same rule as the
+// people package's cleanName), which Postgres text columns would reject.
+func cleanText(s string) bool { return utf8.ValidString(s) && !strings.ContainsRune(s, 0) }
 
 func validID(id string) bool { _, ok := db.ParseID(id); return ok }
