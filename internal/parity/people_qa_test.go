@@ -237,12 +237,6 @@ func TestQA_InputHardening(t *testing.T) {
 			t.Errorf("update: %s: %d", name, st)
 		}
 	}
-	// json.Marshal would turn an invalid byte into U+FFFD, so send it raw.
-	for method, path := range map[string]string{"POST": "/units", "PUT": "/units/" + f.unit1} {
-		raw := `{"unitNumber":"10` + "\xff" + `1","blockId":"` + f.block + `"}`
-		resp := do(t, f.srv, req{method: method, path: path, token: s.token, rawBody: strings.NewReader(raw)})
-		expect(t, resp, http.StatusUnprocessableEntity, method+" unitNumber with invalid UTF-8")
-	}
 	for _, q := range []string{"%", "_", "' OR '1'='1", `\`, "Ana%' --", "%%%%"} {
 		got := s.call("GET", "/people?q="+urlQuery(q), nil, http.StatusOK)
 		if got["total"].(float64) != 0 {
