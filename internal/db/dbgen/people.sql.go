@@ -802,6 +802,7 @@ SELECT DISTINCT l.unit_id
 FROM unit_links l
 JOIN people p ON p.condominium_id = l.condominium_id AND p.id = l.person_id
 WHERE l.condominium_id = $1 AND p.user_id = $2
+  AND l.kind <> 'dependente'
   AND l.starts_on <= civil_today() AND (l.ends_on IS NULL OR l.ends_on > civil_today())
 `
 
@@ -863,6 +864,7 @@ SELECT EXISTS (
     JOIN people pu ON pu.condominium_id = b.condominium_id AND pu.id = b.person_id
     WHERE a.condominium_id = $1 AND a.person_id = $2 AND pu.user_id = $3
       AND a.starts_on <= civil_today() AND (a.ends_on IS NULL OR a.ends_on > civil_today())
+      AND b.kind <> 'dependente'
       AND b.starts_on <= civil_today() AND (b.ends_on IS NULL OR b.ends_on > civil_today())
 )
 `
@@ -952,6 +954,7 @@ SELECT EXISTS (
     SELECT 1 FROM unit_links l
     JOIN people p ON p.condominium_id = l.condominium_id AND p.id = l.person_id
     WHERE l.condominium_id = $1 AND l.unit_id = $2 AND p.user_id = $3
+      AND l.kind <> 'dependente'
       AND l.starts_on <= civil_today() AND (l.ends_on IS NULL OR l.ends_on > civil_today())
 )
 `

@@ -271,6 +271,15 @@ func (s *Service) EndLink(ctx context.Context, linkID string, req EndLinkRequest
 			if !responsible || !householdKind(before.Kind) {
 				return audit.Entry{}, authz.ErrForbidden
 			}
+			// The responsible person only closes links that are still running, and
+			// not retroactively: past ends are reserved for people.write.
+			today := civil.Today()
+			if before.EndsOn != nil && !before.EndsOn.After(today) {
+				return audit.Entry{}, validationf("the link has already ended")
+			}
+			if end.Before(today) {
+				return audit.Entry{}, validationf("endsOn cannot be in the past")
+			}
 		}
 		if !end.After(before.StartsOn) {
 			return audit.Entry{}, validationf("endsOn must be after the start of the link (%s)", civil.Format(before.StartsOn))

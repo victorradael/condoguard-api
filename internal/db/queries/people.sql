@@ -121,15 +121,17 @@ SELECT EXISTS (
     SELECT 1 FROM unit_links l
     JOIN people p ON p.condominium_id = l.condominium_id AND p.id = l.person_id
     WHERE l.condominium_id = @condominium_id AND l.unit_id = @unit_id AND p.user_id = @user_id
+      AND l.kind <> 'dependente'
       AND l.starts_on <= civil_today() AND (l.ends_on IS NULL OR l.ends_on > civil_today())
 );
 
--- Unidades em que a conta tem vínculo vigente (qualquer papel): o que o morador enxerga da casa.
+-- Unidades em que a conta tem vínculo vigente (exceto dependente): o que o morador enxerga da casa.
 -- name: ListUnitIDsByUserLinks :many
 SELECT DISTINCT l.unit_id
 FROM unit_links l
 JOIN people p ON p.condominium_id = l.condominium_id AND p.id = l.person_id
 WHERE l.condominium_id = @condominium_id AND p.user_id = @user_id
+  AND l.kind <> 'dependente'
   AND l.starts_on <= civil_today() AND (l.ends_on IS NULL OR l.ends_on > civil_today());
 
 -- A pessoa mora (vínculo vigente) em alguma unidade em que a conta também tem vínculo vigente?
@@ -140,6 +142,7 @@ SELECT EXISTS (
     JOIN people pu ON pu.condominium_id = b.condominium_id AND pu.id = b.person_id
     WHERE a.condominium_id = @condominium_id AND a.person_id = @person_id AND pu.user_id = @user_id
       AND a.starts_on <= civil_today() AND (a.ends_on IS NULL OR a.ends_on > civil_today())
+      AND b.kind <> 'dependente'
       AND b.starts_on <= civil_today() AND (b.ends_on IS NULL OR b.ends_on > civil_today())
 );
 

@@ -97,6 +97,9 @@ func conflictf(format string, a ...any) error {
 
 func cleanName(s string, max int, what string) (string, error) {
 	s = strings.Join(strings.Fields(s), " ")
+	if strings.ContainsRune(s, 0) || !utf8.ValidString(s) {
+		return "", validationf("%s has invalid characters", what)
+	}
 	if s == "" {
 		return "", validationf("%s is required", what)
 	}
@@ -628,6 +631,12 @@ func (s *Service) UpdatePerson(ctx context.Context, id string, req PersonRequest
 		if after, aerr = s.q.GetPerson(ctx, dbgen.GetPersonParams{CondominiumID: condo, ID: uid}); aerr != nil {
 			return audit.Entry{}, aerr
 		}
+		// An invitation is bound to the e-mail it was sent to: a new e-mail kills the pending ones.
+		if !sameEmail(before.Email, after.Email) {
+			if rerr := s.q.RevokePendingInvitations(ctx, dbgen.RevokePendingInvitationsParams{CondominiumID: condo, PersonID: uid}); rerr != nil {
+				return audit.Entry{}, rerr
+			}
+		}
 		return audit.Entry{Action: audit.ActionUpdate, Resource: resPerson, ResourceID: id, Before: auditPerson(before), After: auditPerson(after)}, nil
 	})
 	if db.IsUniqueViolation(err) {
@@ -671,4 +680,11 @@ func (s *Service) DeletePerson(ctx context.Context, id string) error {
 		return conflictf("the person has links with units (the history is kept); end them instead")
 	}
 	return err
+}
+
+func sameEmail(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
