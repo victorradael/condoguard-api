@@ -13,9 +13,10 @@ import (
 )
 
 func TestPostgresRepository_ShopOwner(t *testing.T) {
-	repo := shopowner.NewPostgresRepository(dbtest.NewPool(t))
-	ctxA := tenant.WithCondominiumID(context.Background(), "condo-a")
-	ctxB := tenant.WithCondominiumID(context.Background(), "condo-b")
+	env := dbtest.NewEnv(t)
+	repo := shopowner.NewPostgresRepository(env.Pool)
+	ctxA := tenant.WithCondominiumID(context.Background(), env.Condo("condo-a"))
+	ctxB := tenant.WithCondominiumID(context.Background(), env.Condo("condo-b"))
 
 	s := &shopowner.ShopOwner{ShopName: "Padaria", CNPJ: "11.222.333/0001-81", Floor: 0, OwnerID: "owner-1"}
 	if err := repo.Save(ctxA, s); err != nil {
@@ -80,9 +81,10 @@ func TestPostgresRepository_ShopOwner(t *testing.T) {
 }
 
 func TestPostgresRepository_ShopOwner_FindAll_OwnerFilterAndPaging(t *testing.T) {
-	repo := shopowner.NewPostgresRepository(dbtest.NewPool(t))
-	ctxA := tenant.WithCondominiumID(context.Background(), "condo-a")
-	ctxB := tenant.WithCondominiumID(context.Background(), "condo-b")
+	env := dbtest.NewEnv(t)
+	repo := shopowner.NewPostgresRepository(env.Pool)
+	ctxA := tenant.WithCondominiumID(context.Background(), env.Condo("condo-a"))
+	ctxB := tenant.WithCondominiumID(context.Background(), env.Condo("condo-b"))
 
 	shops := []*shopowner.ShopOwner{
 		{ShopName: "A1", CNPJ: "11.222.333/0001-81", OwnerID: "owner-a"},

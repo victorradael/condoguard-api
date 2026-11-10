@@ -20,11 +20,11 @@ type postgresRepository struct {
 // NewPostgresRepository returns a Repository backed by the shared pgx pool.
 // Every query is scoped by the condominium ID carried in the context.
 func NewPostgresRepository(pool *pgxpool.Pool) Repository {
-	return &postgresRepository{q: dbgen.New(pool)}
+	return &postgresRepository{q: db.Queries(pool)}
 }
 
 func (r *postgresRepository) Save(ctx context.Context, s *ShopOwner) error {
-	condoID, err := tenant.CondominiumID(ctx)
+	condoID, err := tenant.UUID(ctx)
 	if err != nil {
 		return err
 	}
@@ -50,7 +50,7 @@ func (r *postgresRepository) Save(ctx context.Context, s *ShopOwner) error {
 }
 
 func (r *postgresRepository) FindByID(ctx context.Context, id string) (*ShopOwner, error) {
-	condoID, err := tenant.CondominiumID(ctx)
+	condoID, err := tenant.UUID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +69,7 @@ func (r *postgresRepository) FindByID(ctx context.Context, id string) (*ShopOwne
 }
 
 func (r *postgresRepository) FindAll(ctx context.Context, ownerID string, p page.Params) ([]*ShopOwner, int64, error) {
-	condoID, err := tenant.CondominiumID(ctx)
+	condoID, err := tenant.UUID(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -95,7 +95,7 @@ func (r *postgresRepository) FindAll(ctx context.Context, ownerID string, p page
 }
 
 func (r *postgresRepository) IDsByOwner(ctx context.Context, ownerID string) ([]string, error) {
-	condoID, err := tenant.CondominiumID(ctx)
+	condoID, err := tenant.UUID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +111,7 @@ func (r *postgresRepository) IDsByOwner(ctx context.Context, ownerID string) ([]
 }
 
 func (r *postgresRepository) Update(ctx context.Context, s *ShopOwner) error {
-	condoID, err := tenant.CondominiumID(ctx)
+	condoID, err := tenant.UUID(ctx)
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func (r *postgresRepository) Update(ctx context.Context, s *ShopOwner) error {
 }
 
 func (r *postgresRepository) Delete(ctx context.Context, id string) error {
-	condoID, err := tenant.CondominiumID(ctx)
+	condoID, err := tenant.UUID(ctx)
 	if err != nil {
 		return err
 	}

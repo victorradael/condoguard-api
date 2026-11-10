@@ -23,7 +23,7 @@ RETURNING user_id, family_id
 `
 
 type ConsumeRefreshTokenParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	TokenHash     []byte
 }
 
@@ -48,7 +48,7 @@ WHERE condominium_id = $1 AND token_hash = $2
 `
 
 type GetRefreshTokenFamilyParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	TokenHash     []byte
 }
 
@@ -65,7 +65,7 @@ VALUES ($1, $2, $3, $4, $5)
 `
 
 type InsertRefreshTokenParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	UserID        uuid.UUID
 	FamilyID      uuid.UUID
 	TokenHash     []byte
@@ -90,7 +90,7 @@ WHERE condominium_id = $1 AND family_id = $2 AND revoked_at IS NULL
 `
 
 type RevokeRefreshTokenFamilyParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	FamilyID      uuid.UUID
 }
 
@@ -106,7 +106,7 @@ WHERE condominium_id = $1 AND user_id = $2 AND revoked_at IS NULL
 `
 
 type RevokeUserRefreshTokensParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	UserID        uuid.UUID
 }
 

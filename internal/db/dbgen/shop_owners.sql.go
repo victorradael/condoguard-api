@@ -19,7 +19,7 @@ WHERE condominium_id = $1
 `
 
 type CountShopOwnersParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	OwnerID       *string
 }
 
@@ -36,7 +36,7 @@ WHERE condominium_id = $1 AND id = $2
 `
 
 type DeleteShopOwnerParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	ID            uuid.UUID
 }
 
@@ -49,13 +49,13 @@ func (q *Queries) DeleteShopOwner(ctx context.Context, arg DeleteShopOwnerParams
 }
 
 const getShopOwnerByID = `-- name: GetShopOwnerByID :one
-SELECT id, condominium_id, shop_name, cnpj, floor, owner_id, created_at
+SELECT id, shop_name, cnpj, floor, owner_id, created_at, condominium_id
 FROM shop_owners
 WHERE condominium_id = $1 AND id = $2
 `
 
 type GetShopOwnerByIDParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	ID            uuid.UUID
 }
 
@@ -64,12 +64,12 @@ func (q *Queries) GetShopOwnerByID(ctx context.Context, arg GetShopOwnerByIDPara
 	var i ShopOwner
 	err := row.Scan(
 		&i.ID,
-		&i.CondominiumID,
 		&i.ShopName,
 		&i.Cnpj,
 		&i.Floor,
 		&i.OwnerID,
 		&i.CreatedAt,
+		&i.CondominiumID,
 	)
 	return i, err
 }
@@ -81,7 +81,7 @@ RETURNING id
 `
 
 type InsertShopOwnerParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	ShopName      string
 	Cnpj          string
 	Floor         int32
@@ -108,7 +108,7 @@ WHERE condominium_id = $1 AND owner_id = $2
 `
 
 type ListShopOwnerIDsByOwnerParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	OwnerID       string
 }
 
@@ -133,7 +133,7 @@ func (q *Queries) ListShopOwnerIDsByOwner(ctx context.Context, arg ListShopOwner
 }
 
 const listShopOwners = `-- name: ListShopOwners :many
-SELECT id, condominium_id, shop_name, cnpj, floor, owner_id, created_at
+SELECT id, shop_name, cnpj, floor, owner_id, created_at, condominium_id
 FROM shop_owners
 WHERE condominium_id = $1
   AND ($2::text IS NULL OR owner_id = $2::text)
@@ -142,7 +142,7 @@ LIMIT $4 OFFSET $3
 `
 
 type ListShopOwnersParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	OwnerID       *string
 	PageOffset    int32
 	PageLimit     int32
@@ -165,12 +165,12 @@ func (q *Queries) ListShopOwners(ctx context.Context, arg ListShopOwnersParams) 
 		var i ShopOwner
 		if err := rows.Scan(
 			&i.ID,
-			&i.CondominiumID,
 			&i.ShopName,
 			&i.Cnpj,
 			&i.Floor,
 			&i.OwnerID,
 			&i.CreatedAt,
+			&i.CondominiumID,
 		); err != nil {
 			return nil, err
 		}
@@ -193,7 +193,7 @@ type UpdateShopOwnerParams struct {
 	Cnpj          string
 	Floor         int32
 	OwnerID       string
-	CondominiumID string
+	CondominiumID uuid.UUID
 	ID            uuid.UUID
 }
 

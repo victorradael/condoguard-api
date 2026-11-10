@@ -35,14 +35,15 @@ func saveUser(t *testing.T, pool *pgxpool.Pool, condo, name string, roles ...str
 }
 
 func TestPostgresRepository_Notification(t *testing.T) {
-	pool := dbtest.NewPool(t)
+	env := dbtest.NewEnv(t)
+	pool := env.Pool
 	repo := notification.NewPostgresRepository(pool)
-	ctxA := tenant.WithCondominiumID(context.Background(), "condo-a")
-	ctxB := tenant.WithCondominiumID(context.Background(), "condo-b")
+	ctxA := tenant.WithCondominiumID(context.Background(), env.Condo("condo-a"))
+	ctxB := tenant.WithCondominiumID(context.Background(), env.Condo("condo-b"))
 	all := authz.Scope{All: true}
 
-	userA := saveUser(t, pool, "condo-a", "alice", authz.RoleUser)
-	userB := saveUser(t, pool, "condo-a", "bob", authz.RoleUser)
+	userA := saveUser(t, pool, env.Condo("condo-a"), "alice", authz.RoleMorador)
+	userB := saveUser(t, pool, env.Condo("condo-a"), "bob", authz.RoleMorador)
 
 	base := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 	older := &notification.Notification{Message: "antiga", CreatedByID: "admin", CreatedAt: base, ResidentIDs: []string{"r1", "r2"}}

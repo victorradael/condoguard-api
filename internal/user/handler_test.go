@@ -17,8 +17,8 @@ import (
 
 const (
 	handlerSecret = "dGVzdC1zZWNyZXQta2V5LWZvci11bml0LXRlc3RpbmctMzJi"
-	condoA        = "condo-a"
-	condoB        = "condo-b"
+	condoA        = dbtest.CondoA
+	condoB        = dbtest.CondoB
 	strongPass    = "Str0ng-Passw0rd"
 )
 
@@ -37,7 +37,7 @@ func newRouterWithRepo(repo user.Repository) http.Handler {
 
 func newPostgresRouter(t *testing.T) http.Handler {
 	t.Helper()
-	return newRouterWithRepo(user.NewPostgresRepository(dbtest.NewPool(t)))
+	return newRouterWithRepo(user.NewPostgresRepository(dbtest.NewPool(t, dbtest.CondoA, dbtest.CondoB)))
 }
 
 func tokenFor(t *testing.T, userID, condoID string, roles ...string) string {
@@ -51,12 +51,12 @@ func tokenFor(t *testing.T, userID, condoID string, roles ...string) string {
 
 func adminToken(t *testing.T) string {
 	t.Helper()
-	return tokenFor(t, "admin-1", condoA, "ROLE_ADMIN")
+	return tokenFor(t, "admin-1", condoA, "sindico")
 }
 
 func userToken(t *testing.T) string {
 	t.Helper()
-	return tokenFor(t, "user-1", condoA, "ROLE_USER")
+	return tokenFor(t, "user-1", condoA, "morador")
 }
 
 func authRequest(method, path, token string, body any) *http.Request {
@@ -155,7 +155,7 @@ func TestUsers_Create_Returns201WithUser(t *testing.T) {
 		"username": "bob",
 		"email":    "bob@example.com",
 		"password": strongPass,
-		"roles":    []string{"ROLE_USER"},
+		"roles":    []string{"morador"},
 	}))
 
 	if rec.Code != http.StatusCreated {
@@ -183,8 +183,8 @@ func TestUsers_Create_DefaultsToRoleUser_AndNormalisesEmail(t *testing.T) {
 		t.Errorf("expected normalised email, got %v", u["email"])
 	}
 	roles, _ := u["roles"].([]any)
-	if len(roles) != 1 || roles[0] != "ROLE_USER" {
-		t.Errorf("expected default roles [ROLE_USER], got %v", u["roles"])
+	if len(roles) != 1 || roles[0] != "morador" {
+		t.Errorf("expected default roles [morador], got %v", u["roles"])
 	}
 }
 
@@ -366,11 +366,11 @@ func TestHandler_Security_RoleUserForbiddenOnAdminRoutes(t *testing.T) {
 		body         any
 	}{
 		{http.MethodGet, "/users", nil},
-		{http.MethodPost, "/users", map[string]any{"username": "x", "email": "x@example.com", "password": strongPass, "roles": []string{"ROLE_ADMIN"}}},
+		{http.MethodPost, "/users", map[string]any{"username": "x", "email": "x@example.com", "password": strongPass, "roles": []string{"sindico"}}},
 		{http.MethodGet, "/users/" + id, nil},
-		{http.MethodPut, "/users/" + id, map[string]any{"roles": []string{"ROLE_ADMIN"}}},
+		{http.MethodPut, "/users/" + id, map[string]any{"roles": []string{"sindico"}}},
 		{http.MethodDelete, "/users/" + id, nil},
-		{http.MethodPut, "/users/me", map[string]any{"roles": []string{"ROLE_ADMIN"}}},
+		{http.MethodPut, "/users/me", map[string]any{"roles": []string{"sindico"}}},
 		{http.MethodDelete, "/users/me", nil},
 	}
 	for _, c := range cases {
@@ -386,7 +386,7 @@ func TestHandler_Security_RoleUserForbiddenOnAdminRoutes(t *testing.T) {
 		t.Fatalf("expected exactly 1 user after forbidden calls, got %d", list.Total)
 	}
 	roles, _ := list.Items[0]["roles"].([]any)
-	if len(roles) != 1 || roles[0] != "ROLE_USER" {
+	if len(roles) != 1 || roles[0] != "morador" {
 		t.Errorf("victim roles must be unchanged, got %v", list.Items[0]["roles"])
 	}
 }
@@ -413,7 +413,7 @@ func TestHandler_Security_MeReturnsOwnUserForRoleUser(t *testing.T) {
 	})
 	id := fmt.Sprintf("%v", created["id"])
 
-	rec := serve(router, authRequest(http.MethodGet, "/users/me", tokenFor(t, id, condoA, "ROLE_USER"), nil))
+	rec := serve(router, authRequest(http.MethodGet, "/users/me", tokenFor(t, id, condoA, "morador"), nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d — %s", rec.Code, rec.Body.String())
 	}
@@ -426,7 +426,7 @@ func TestHandler_Security_MeReturnsOwnUserForRoleUser(t *testing.T) {
 		t.Errorf("unexpected /users/me body: %v", me)
 	}
 	roles, _ := me["roles"].([]any)
-	if len(roles) != 1 || roles[0] != "ROLE_USER" {
+	if len(roles) != 1 || roles[0] != "morador" {
 		t.Errorf("unexpected roles: %v", me["roles"])
 	}
 	for _, k := range []string{"password", "passwordHash", "password_hash"} {
@@ -445,10 +445,10 @@ func TestHandler_Security_MeForAdminReturnsOwnUser(t *testing.T) {
 		"username": "boss",
 		"email":    "boss@example.com",
 		"password": strongPass,
-		"roles":    []string{"ROLE_ADMIN"},
+		"roles":    []string{"sindico"},
 	})
 	id := fmt.Sprintf("%v", created["id"])
-	rec := serve(router, authRequest(http.MethodGet, "/users/me", tokenFor(t, id, condoA, "ROLE_ADMIN"), nil))
+	rec := serve(router, authRequest(http.MethodGet, "/users/me", tokenFor(t, id, condoA, "sindico"), nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
@@ -461,7 +461,7 @@ func TestHandler_Security_MeForAdminReturnsOwnUser(t *testing.T) {
 
 func TestHandler_Security_MeForDeletedAccountReturns401(t *testing.T) {
 	router := newTestRouter(t)
-	rec := serve(router, authRequest(http.MethodGet, "/users/me", tokenFor(t, "gone-user", condoA, "ROLE_USER"), nil))
+	rec := serve(router, authRequest(http.MethodGet, "/users/me", tokenFor(t, "gone-user", condoA, "morador"), nil))
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", rec.Code)
 	}
@@ -471,7 +471,7 @@ func TestHandler_Security_MeForDeletedAccountReturns401(t *testing.T) {
 
 func TestHandler_Security_CreateWithUnknownRoleReturns422(t *testing.T) {
 	router := newTestRouter(t)
-	for _, roles := range [][]string{{"ROLE_SUPERUSER"}, {"ROLE_USER", "ROLE_SUPERUSER"}, {"role_admin"}, {""}} {
+	for _, roles := range [][]string{{"ROLE_SUPERUSER"}, {"morador", "ROLE_SUPERUSER"}, {"role_admin"}, {""}} {
 		rec := serve(router, authRequest(http.MethodPost, "/users", adminToken(t), map[string]any{
 			"username": "eve",
 			"email":    "eve@example.com",
@@ -502,7 +502,7 @@ func TestHandler_Security_UpdateWithUnknownRoleReturns422(t *testing.T) {
 	var got map[string]any
 	_ = json.NewDecoder(rec.Body).Decode(&got)
 	roles, _ := got["roles"].([]any)
-	if len(roles) != 1 || roles[0] != "ROLE_USER" {
+	if len(roles) != 1 || roles[0] != "morador" {
 		t.Errorf("roles must be unchanged after rejected update, got %v", got["roles"])
 	}
 }
@@ -632,7 +632,7 @@ func TestIntegration_Users_CRUD(t *testing.T) {
 	router := newPostgresRouter(t)
 
 	crudRoundTrip(t, router, adminToken(t), "/users",
-		map[string]any{"username": "pg-user", "email": "pg-user@example.com", "password": "S3cr3t!Pass", "roles": []string{"ROLE_USER"}},
+		map[string]any{"username": "pg-user", "email": "pg-user@example.com", "password": "S3cr3t!Pass", "roles": []string{"morador"}},
 		map[string]any{"username": "pg-user-renamed", "email": "ignored@example.com"},
 		func(_, updated map[string]any) {
 			if updated["username"] != "pg-user-renamed" {
@@ -652,7 +652,7 @@ func TestHandler_Security_OtherCondominiumCannotAccessUsers(t *testing.T) {
 func otherCondominiumCannotAccessUsers(t *testing.T, router http.Handler) {
 	t.Helper()
 	tokA := adminToken(t)
-	tokB := tokenFor(t, "admin-b", condoB, "ROLE_ADMIN")
+	tokB := tokenFor(t, "admin-b", condoB, "sindico")
 
 	created := createUser(t, router, tokA, map[string]any{
 		"username": "ana", "email": "ana@condo-a.test", "password": strongPass,
@@ -662,7 +662,7 @@ func otherCondominiumCannotAccessUsers(t *testing.T, router http.Handler) {
 	if rec := serve(router, authRequest(http.MethodGet, "/users/"+id, tokB, nil)); rec.Code != http.StatusNotFound {
 		t.Errorf("GET: expected 404, got %d", rec.Code)
 	}
-	if rec := serve(router, authRequest(http.MethodPut, "/users/"+id, tokB, map[string]any{"username": "pwned", "roles": []string{"ROLE_ADMIN"}})); rec.Code != http.StatusNotFound {
+	if rec := serve(router, authRequest(http.MethodPut, "/users/"+id, tokB, map[string]any{"username": "pwned", "roles": []string{"sindico"}})); rec.Code != http.StatusNotFound {
 		t.Errorf("PUT: expected 404, got %d", rec.Code)
 	}
 	if rec := serve(router, authRequest(http.MethodDelete, "/users/"+id, tokB, nil)); rec.Code != http.StatusNotFound {
@@ -673,7 +673,7 @@ func otherCondominiumCannotAccessUsers(t *testing.T, router http.Handler) {
 		t.Errorf("condo-b list must be empty, got %+v", listB)
 	}
 	// /users/me with a condo-b token carrying a condo-a user's ID must not resolve.
-	if rec := serve(router, authRequest(http.MethodGet, "/users/me", tokenFor(t, id, condoB, "ROLE_USER"), nil)); rec.Code != http.StatusUnauthorized {
+	if rec := serve(router, authRequest(http.MethodGet, "/users/me", tokenFor(t, id, condoB, "morador"), nil)); rec.Code != http.StatusUnauthorized {
 		t.Errorf("GET /users/me cross-tenant: expected 401, got %d", rec.Code)
 	}
 
@@ -685,7 +685,7 @@ func otherCondominiumCannotAccessUsers(t *testing.T, router http.Handler) {
 	var got map[string]any
 	_ = json.NewDecoder(rec.Body).Decode(&got)
 	roles, _ := got["roles"].([]any)
-	if got["username"] != "ana" || len(roles) != 1 || roles[0] != "ROLE_USER" {
+	if got["username"] != "ana" || len(roles) != 1 || roles[0] != "morador" {
 		t.Errorf("user changed by another condominium: %v", got)
 	}
 }
@@ -694,7 +694,7 @@ func TestIntegration_Users_EmailUniqueAcrossCondominiums(t *testing.T) {
 	router := newPostgresRouter(t)
 	createUser(t, router, adminToken(t), map[string]any{"username": "ana", "email": "Ana@X.io", "password": strongPass})
 
-	rec := serve(router, authRequest(http.MethodPost, "/users", tokenFor(t, "admin-b", condoB, "ROLE_ADMIN"), map[string]any{
+	rec := serve(router, authRequest(http.MethodPost, "/users", tokenFor(t, "admin-b", condoB, "sindico"), map[string]any{
 		"username": "ana", "email": "ana@x.io", "password": strongPass,
 	}))
 	if rec.Code != http.StatusConflict {
@@ -720,7 +720,7 @@ func TestIntegration_Users_MeAndPagination(t *testing.T) {
 		t.Errorf("unexpected page: %+v", resp)
 	}
 
-	rec := serve(router, authRequest(http.MethodGet, "/users/me", tokenFor(t, firstID, condoA, "ROLE_USER"), nil))
+	rec := serve(router, authRequest(http.MethodGet, "/users/me", tokenFor(t, firstID, condoA, "morador"), nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("/users/me: expected 200, got %d", rec.Code)
 	}

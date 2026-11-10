@@ -25,6 +25,7 @@ func clearEnv(t *testing.T) {
 		"REGISTER_MAX_PER_IP", "REGISTER_WINDOW",
 		"ACCESS_TOKEN_TTL", "REFRESH_TOKEN_TTL", "CORS_ALLOWED_ORIGINS",
 		"COOKIE_SECURE", "COOKIE_DOMAIN", "COOKIE_PATH_PREFIX", "METRICS_TOKEN", "TRUSTED_PROXIES", "APP_ENV",
+		"TOTP_ENCRYPTION_KEY", "TOTP_ISSUER", "WEB_BASE_URL", "SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "MAIL_FROM", "REQUIRE_VERIFIED_EMAIL",
 	} {
 		t.Setenv(k, "")
 	}
@@ -133,12 +134,15 @@ func TestConfigFromEnv_Production_RequiresInfrastructure(t *testing.T) {
 		t.Setenv("DATABASE_URL", "postgres://u:p@db/condoguard")
 		t.Setenv("REDIS_URL", "redis://:p@redis:6379/0")
 		t.Setenv("CORS_ALLOWED_ORIGINS", "https://condoguard.example")
+		t.Setenv("TOTP_ENCRYPTION_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+		t.Setenv("WEB_BASE_URL", "https://condoguard.example")
+		t.Setenv("SMTP_HOST", "smtp.example")
 	}
 	set(t)
-	if cfg, err := app.ConfigFromEnv(); err != nil || !cfg.Production {
-		t.Fatalf("complete production config rejected: %v", err)
+	if cfg, err := app.ConfigFromEnv(); err != nil || !cfg.Production || !cfg.RequireVerifiedEmail || cfg.SMTPAddr != "smtp.example:587" {
+		t.Fatalf("complete production config rejected or wrong: %v", err)
 	}
-	for _, k := range []string{"DATABASE_URL", "REDIS_URL", "CORS_ALLOWED_ORIGINS"} {
+	for _, k := range []string{"DATABASE_URL", "REDIS_URL", "CORS_ALLOWED_ORIGINS", "TOTP_ENCRYPTION_KEY", "WEB_BASE_URL", "SMTP_HOST"} {
 		t.Run(k, func(t *testing.T) {
 			set(t)
 			t.Setenv(k, "")

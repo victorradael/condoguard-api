@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/victorradael/condoguard/api/internal/audit"
 	"github.com/victorradael/condoguard/api/internal/authz"
 	"github.com/victorradael/condoguard/api/pkg/page"
 )
@@ -14,16 +15,25 @@ import (
 // only read the shops they own (ownerId). A shop the caller may not see is
 // reported as not found, so its existence does not leak.
 type Service struct {
-	repo Repository
+	repo  Repository
+	trail audit.Trail
 }
 
 func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+	return &Service{repo: repo, trail: audit.NewTrail()}
 }
 
-// Create validates the request, formats and validates the CNPJ, then persists. Admins only.
+// WithAudit makes every change write its audit entry in the same transaction.
+func (s *Service) WithAudit(t audit.Trail) *Service {
+	s.trail = t
+	return s
+}
+
+const auditResource = "shop_owner"
+
+// Create validates the request, formats and validates the CNPJ, then persists. Needs units.write.
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*ShopOwner, error) {
-	if _, err := authz.RequireAdmin(ctx); err != nil {
+	if _, err := authz.Require(ctx, authz.PermUnitsWrite); err != nil {
 		return nil, err
 	}
 	if req.ShopName == "" {
@@ -45,7 +55,13 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*ShopOwner, er
 		OwnerID:  req.OwnerID,
 	}
 
-	if err := s.repo.Save(ctx, shop); err != nil {
+	err := s.trail.Atomic(ctx, func(ctx context.Context) (audit.Entry, error) {
+		if err := s.repo.Save(ctx, shop); err != nil {
+			return audit.Entry{}, err
+		}
+		return audit.Entry{Action: audit.ActionCreate, Resource: auditResource, ResourceID: shop.ID, After: shop}, nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return shop, nil
@@ -61,7 +77,7 @@ func (s *Service) GetByID(ctx context.Context, id string) (*ShopOwner, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !p.IsAdmin() && shop.OwnerID != p.UserID {
+	if !p.Can(authz.PermUnitsReadAll) && shop.OwnerID != p.UserID {
 		return nil, ErrNotFound
 	}
 	return shop, nil
@@ -74,7 +90,7 @@ func (s *Service) List(ctx context.Context, pg page.Params) (page.Result[*ShopOw
 		return page.Result[*ShopOwner]{}, err
 	}
 	owner := p.UserID
-	if p.IsAdmin() {
+	if p.Can(authz.PermUnitsReadAll) {
 		owner = ""
 	}
 	list, total, err := s.repo.FindAll(ctx, owner, pg)
@@ -84,15 +100,16 @@ func (s *Service) List(ctx context.Context, pg page.Params) (page.Result[*ShopOw
 	return page.New(list, pg, total), nil
 }
 
-// Update applies shopName and floor changes. CNPJ is immutable after creation. Admins only.
+// Update applies shopName and floor changes. CNPJ is immutable after creation. Needs units.write.
 func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*ShopOwner, error) {
-	if _, err := authz.RequireAdmin(ctx); err != nil {
+	if _, err := authz.Require(ctx, authz.PermUnitsWrite); err != nil {
 		return nil, err
 	}
 	shop, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	before := *shop
 
 	if req.ShopName != "" {
 		shop.ShopName = req.ShopName
@@ -101,18 +118,33 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*Sh
 		shop.Floor = req.Floor
 	}
 
-	if err := s.repo.Update(ctx, shop); err != nil {
+	err = s.trail.Atomic(ctx, func(ctx context.Context) (audit.Entry, error) {
+		if uerr := s.repo.Update(ctx, shop); uerr != nil {
+			return audit.Entry{}, uerr
+		}
+		return audit.Entry{Action: audit.ActionUpdate, Resource: auditResource, ResourceID: shop.ID, Before: before, After: shop}, nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return shop, nil
 }
 
-// Delete removes the shop. Admins only.
+// Delete removes the shop. Needs units.write.
 func (s *Service) Delete(ctx context.Context, id string) error {
-	if _, err := authz.RequireAdmin(ctx); err != nil {
+	if _, err := authz.Require(ctx, authz.PermUnitsWrite); err != nil {
 		return err
 	}
-	return s.repo.Delete(ctx, id)
+	return s.trail.Atomic(ctx, func(ctx context.Context) (audit.Entry, error) {
+		before, err := s.repo.FindByID(ctx, id)
+		if err != nil {
+			return audit.Entry{}, err
+		}
+		if err = s.repo.Delete(ctx, id); err != nil {
+			return audit.Entry{}, err
+		}
+		return audit.Entry{Action: audit.ActionDelete, Resource: auditResource, ResourceID: id, Before: before}, nil
+	})
 }
 
 // UnitIDsOwnedBy returns the IDs of the shops owned by userID.

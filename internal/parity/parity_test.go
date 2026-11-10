@@ -38,23 +38,29 @@ const (
 	webOrigin    = "http://localhost:3000"
 	evilOrigin   = "https://evil.example"
 	password     = "Corr3ct-Horse-Battery"
-	condoA       = "condo-a"
-	condoB       = "condo-b"
+	condoA       = dbtest.CondoA
+	condoB       = dbtest.CondoB
 	maxAttempts  = 3
 	maxSignUps   = 12
 )
 
 // ── test environment ──────────────────────────────────────────────────────────
 
-// env is one migrated database shared by one server per condominium.
+// env is one migrated database shared by one server per condominium. The
+// servers connect as a role that owns nothing and has no BYPASSRLS, like the
+// API in production, so Row-Level Security applies to every request.
 type env struct {
 	t     *testing.T
 	dbURL string
+	db    *dbtest.Env
 }
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
-	return &env{t: t, dbURL: dbtest.NewDatabase(t)}
+	d := dbtest.NewEnv(t)
+	d.SeedCondo(condoA)
+	d.SeedCondo(condoB)
+	return &env{t: t, dbURL: d.AppURL, db: d}
 }
 
 // server starts the API with condoID as the sign-up/login tenant.
@@ -62,7 +68,7 @@ func (e *env) server(condoID string) *httptest.Server {
 	e.t.Helper()
 	cfg := app.Config{
 		DatabaseURL:        e.dbURL,
-		MigrateOnStart:     true,
+		MigrateOnStart:     false, // dbtest.NewEnv already migrated
 		CondominiumID:      condoID,
 		LoginMaxAttempts:   maxAttempts,
 		LoginLockoutWindow: time.Minute,
@@ -87,7 +93,7 @@ func (e *env) server(condoID string) *httptest.Server {
 	return srv
 }
 
-// createAdmin creates a ROLE_ADMIN account the way cmd/createadmin does:
+// createAdmin creates a sindico account the way cmd/createadmin does:
 // public sign-up never grants it.
 func (e *env) createAdmin(condoID, email string) {
 	e.t.Helper()
@@ -101,7 +107,7 @@ func (e *env) createAdmin(condoID, email string) {
 		Username: strings.Split(email, "@")[0],
 		Email:    email,
 		Password: password,
-		Roles:    []string{authz.RoleAdmin},
+		Roles:    []string{authz.RoleSindico},
 	})
 	if err != nil {
 		e.t.Fatalf("create admin: %v", err)
@@ -184,7 +190,7 @@ func login(t *testing.T, srv *httptest.Server, email string) string {
 	return tok
 }
 
-// resident registers and logs in a ROLE_USER and returns its token and id.
+// resident registers and logs in a morador and returns its token and id.
 func resident(t *testing.T, srv *httptest.Server, name string) (token, id string) {
 	t.Helper()
 	email := name + "@exemplo.test"
@@ -226,21 +232,21 @@ func TestSecurity1_Register_ClientRolesAreIgnored(t *testing.T) {
 
 	expect(t, do(t, srv, req{method: http.MethodPost, path: "/auth/register", body: map[string]any{
 		"username": "mallory", "email": "mallory@exemplo.test", "password": password,
-		"roles": []string{"ROLE_ADMIN"}, "role": "admin",
+		"roles": []string{"sindico"}, "role": "admin",
 	}}), http.StatusCreated, "register")
 
 	resp := do(t, srv, req{method: http.MethodPost, path: "/auth/login", body: map[string]any{"email": "mallory@exemplo.test", "password": password}})
 	expect(t, resp, http.StatusOK, "login")
 	body := decode(t, resp)
 	roles, _ := body["roles"].([]any)
-	if len(roles) != 1 || roles[0] != authz.RoleUser {
+	if len(roles) != 1 || roles[0] != authz.RoleMorador {
 		t.Fatalf("sign-up must create a resident only, got roles %v", roles)
 	}
 	token, _ := body["accessToken"].(string)
 
 	expect(t, do(t, srv, req{method: http.MethodGet, path: "/users", token: token}), http.StatusForbidden, "GET /users as resident")
 	expect(t, do(t, srv, req{method: http.MethodPost, path: "/users", token: token, body: map[string]any{
-		"username": "evil", "email": "evil@exemplo.test", "password": password, "roles": []string{"ROLE_ADMIN"},
+		"username": "evil", "email": "evil@exemplo.test", "password": password, "roles": []string{"sindico"},
 	}}), http.StatusForbidden, "POST /users as resident")
 }
 
@@ -250,10 +256,10 @@ func TestSecurity1_AdminCanCreateAdmins(t *testing.T) {
 	admin := adminToken(t, e, srv, condoA)
 
 	created := create(t, srv, admin, "/users", map[string]any{
-		"username": "sub", "email": "sub@exemplo.test", "password": password, "roles": []string{"ROLE_ADMIN"},
+		"username": "sub", "email": "sub@exemplo.test", "password": password, "roles": []string{"sindico"},
 	})
-	if roles, _ := created["roles"].([]any); len(roles) != 1 || roles[0] != authz.RoleAdmin {
-		t.Errorf("admin must be able to grant ROLE_ADMIN, got %v", created["roles"])
+	if roles, _ := created["roles"].([]any); len(roles) != 1 || roles[0] != authz.RoleSindico {
+		t.Errorf("admin must be able to grant sindico, got %v", created["roles"])
 	}
 }
 
@@ -264,7 +270,7 @@ func TestSecurity2_TokenSignedWithOtherSecret_Returns401(t *testing.T) {
 
 	// The old default secret, base64-padded to the minimum length.
 	forger := pkgjwt.MustNewService("c2VjcmV0c2VjcmV0c2VjcmV0c2VjcmV0c2VjcmV0c2VjcmV0")
-	forged, err := forger.GenerateToken("attacker", condoA, []string{authz.RoleAdmin})
+	forged, err := forger.GenerateToken("attacker", condoA, []string{authz.RoleSindico})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,13 +360,18 @@ func TestSecurity4_CondominiumIsolation(t *testing.T) {
 		}
 	}
 
-	// The e-mail is the login and is unique across condominiums, so a login
-	// through B's server never reaches A's account.
+	// The e-mail is the login and is unique across condominiums. The account
+	// belongs to A, so a login through B's server (whose default condominium
+	// only matters for sign-up) opens a session in A, never in B.
 	expect(t, do(t, srvB, req{method: http.MethodPost, path: "/auth/register", body: map[string]any{
 		"username": "ana", "email": "ana@exemplo.test", "password": password,
 	}}), http.StatusConflict, "same e-mail in another condominium")
-	expect(t, do(t, srvB, req{method: http.MethodPost, path: "/auth/login", body: map[string]any{"email": "ana@exemplo.test", "password": password}}),
-		http.StatusUnauthorized, "login into A's account through B")
+	viaB := login(t, srvB, "ana@exemplo.test")
+	resp := do(t, srvB, req{method: http.MethodGet, path: "/condominium", token: viaB})
+	expect(t, resp, http.StatusOK, "current condominium")
+	if id := decode(t, resp)["id"]; id != condoA {
+		t.Errorf("a login of A's account must open a session in A, got %v", id)
+	}
 }
 
 // ── Item 5: author from the token, read state per recipient ──────────────────
@@ -604,7 +615,7 @@ func TestSecurity8_RoleChangeRevokesRefreshTokens(t *testing.T) {
 	expect(t, resp, http.StatusOK, "refresh after rename")
 	rt, _ = decode(t, resp)["refreshToken"].(string)
 
-	expect(t, do(t, srv, req{method: http.MethodPut, path: "/users/" + id, token: admin, body: map[string]any{"roles": []string{"ROLE_ADMIN"}}}), http.StatusOK, "promote")
+	expect(t, do(t, srv, req{method: http.MethodPut, path: "/users/" + id, token: admin, body: map[string]any{"roles": []string{"sindico"}}}), http.StatusOK, "promote")
 	expect(t, do(t, srv, req{method: http.MethodPost, path: "/auth/refresh", body: map[string]any{"refreshToken": rt}}), http.StatusUnauthorized, "refresh after role change")
 }
 

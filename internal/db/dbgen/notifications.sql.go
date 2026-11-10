@@ -22,7 +22,7 @@ WHERE n.condominium_id = $1
 `
 
 type CountNotificationsParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	Restricted    bool
 	ResidentIds   []string
 	ShopOwnerIds  []string
@@ -46,7 +46,7 @@ WHERE condominium_id = $1 AND id = $2
 `
 
 type DeleteNotificationParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	ID            uuid.UUID
 }
 
@@ -69,13 +69,13 @@ WHERE n.condominium_id = $2 AND n.id = $3
 
 type GetNotificationByIDParams struct {
 	ReaderID      *uuid.UUID
-	CondominiumID string
+	CondominiumID uuid.UUID
 	ID            uuid.UUID
 }
 
 type GetNotificationByIDRow struct {
 	ID            uuid.UUID
-	CondominiumID string
+	CondominiumID uuid.UUID
 	Message       string
 	CreatedByID   string
 	CreatedAt     time.Time
@@ -108,7 +108,7 @@ RETURNING id
 `
 
 type InsertNotificationParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	Message       string
 	CreatedByID   string
 	CreatedAt     time.Time
@@ -146,7 +146,7 @@ LIMIT $7 OFFSET $6
 
 type ListNotificationsParams struct {
 	ReaderID      *uuid.UUID
-	CondominiumID string
+	CondominiumID uuid.UUID
 	Restricted    bool
 	ResidentIds   []string
 	ShopOwnerIds  []string
@@ -156,7 +156,7 @@ type ListNotificationsParams struct {
 
 type ListNotificationsRow struct {
 	ID            uuid.UUID
-	CondominiumID string
+	CondominiumID uuid.UUID
 	Message       string
 	CreatedByID   string
 	CreatedAt     time.Time
@@ -222,7 +222,7 @@ LIMIT 1
 
 type MarkNotificationReadParams struct {
 	UserID         uuid.UUID
-	CondominiumID  string
+	CondominiumID  uuid.UUID
 	NotificationID uuid.UUID
 }
 
@@ -244,7 +244,7 @@ type UpdateNotificationParams struct {
 	Message       string
 	ResidentIds   []string
 	ShopOwnerIds  []string
-	CondominiumID string
+	CondominiumID uuid.UUID
 	ID            uuid.UUID
 }
 

@@ -38,12 +38,12 @@ func tokenFor(t *testing.T, userID, condo string, roles ...string) string {
 // validToken is an admin of testCondo (admins manage notifications).
 func validToken(t *testing.T) string {
 	t.Helper()
-	return tokenFor(t, "admin-1", testCondo, authz.RoleAdmin)
+	return tokenFor(t, "admin-1", testCondo, authz.RoleSindico)
 }
 
 func userToken(t *testing.T, userID string) string {
 	t.Helper()
-	return tokenFor(t, userID, testCondo, authz.RoleUser)
+	return tokenFor(t, userID, testCondo, authz.RoleMorador)
 }
 
 func authReq(method, path, token string, body any) *http.Request {
@@ -326,13 +326,13 @@ func TestNotifications_MarkAsRead_NonExistent_Returns404(t *testing.T) {
 // ── Integration (PostgreSQL; requires TEST_DATABASE_URL) ───────────────────────
 
 func TestIntegration_Notifications_CRUD(t *testing.T) {
-	pool := dbtest.NewPool(t)
-	const condo = "condo-test"
-	admin := saveUser(t, pool, condo, "admin", authz.RoleAdmin)
+	pool := dbtest.NewPool(t, dbtest.CondoA, dbtest.CondoB)
+	const condo = dbtest.CondoA
+	admin := saveUser(t, pool, condo, "admin", authz.RoleSindico)
 	router := tenant.Middleware("deployment-default")(notification.NewHandler(
 		notification.NewService(notification.NewPostgresRepository(pool), testUnits),
 		middleware.Authenticate(handlerJWT)))
-	tok := tokenFor(t, admin, condo, authz.RoleAdmin)
+	tok := tokenFor(t, admin, condo, authz.RoleSindico)
 
 	crudRoundTrip(t, router, tok, "/notifications",
 		map[string]any{"message": "Aviso", "residentIds": []string{"r1"}, "createdById": "someone-else"},
@@ -511,7 +511,7 @@ func TestHandler_Security_OtherCondominium_Returns404EvenForAdmin(t *testing.T) 
 	router := newTestRouter(t)
 	n := createNotification(t, router, validToken(t), nil)
 	path := fmt.Sprintf("/notifications/%v", n["id"])
-	other := tokenFor(t, "admin-b", "condo-b", authz.RoleAdmin)
+	other := tokenFor(t, "admin-b", dbtest.CondoB, authz.RoleSindico)
 
 	for _, c := range []struct {
 		method, path string

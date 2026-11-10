@@ -110,7 +110,7 @@ func TestRegister_Security_RolesFromClientAreIgnored(t *testing.T) {
 	f := newFixture(t)
 	rec := f.do(t, "/auth/register", map[string]any{
 		"username": "mallory", "email": "mallory@example.com", "password": goodPass,
-		"roles": []string{"ROLE_ADMIN"},
+		"roles": []string{"sindico"},
 	})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d", rec.Code)
@@ -119,8 +119,11 @@ func TestRegister_Security_RolesFromClientAreIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(u.Roles) != 1 || u.Roles[0] != "ROLE_USER" {
-		t.Fatalf("expected [ROLE_USER], got %v", u.Roles)
+	if u, err = f.repo.FindByID(ctxA(), u.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(u.Roles) != 1 || u.Roles[0] != "morador" {
+		t.Fatalf("expected [morador], got %v", u.Roles)
 	}
 
 	pair := decodePair(t, f.do(t, "/auth/login", map[string]string{"email": "mallory@example.com", "password": goodPass}))
@@ -129,8 +132,8 @@ func TestRegister_Security_RolesFromClientAreIgnored(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, r := range claims.Roles {
-		if r == "ROLE_ADMIN" {
-			t.Fatal("token must not carry ROLE_ADMIN")
+		if r == "sindico" {
+			t.Fatal("token must not carry sindico")
 		}
 	}
 }
@@ -408,7 +411,9 @@ func TestCookieFlow_RefreshAndLogout(t *testing.T) {
 
 // ── Item 4: sessions are scoped to the condominium ────────────────────────────
 
-func TestRefresh_Security_TokenOfAnotherCondominiumIsRejected(t *testing.T) {
+// The refresh request carries no tenant: the session stays in the condominium
+// that issued it, whatever the deployment default is.
+func TestRefresh_Security_SessionStaysInItsCondominium(t *testing.T) {
 	repo, tokens := auth.NewInMemoryRepository(), auth.NewInMemoryTokenStore()
 	f := newFixtureWith(t, repo, tokens)
 	f.register(t, "lia@example.com")
@@ -419,8 +424,13 @@ func TestRefresh_Security_TokenOfAnotherCondominiumIsRejected(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", strings.NewReader(`{"refreshToken":"`+p.RefreshToken+`"}`))
 	rec := httptest.NewRecorder()
 	other.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	refreshed := decodePair(t, rec)
+	claims, err := jwtSvc.ValidateToken(refreshed.AccessToken)
+	if err != nil || claims.CondominiumID != "condo-a" {
+		t.Errorf("the refreshed session must stay in condo-a, got %+v (%v)", claims, err)
 	}
 	if rec := f.do(t, "/auth/login", map[string]string{"email": "lia@example.com", "password": goodPass}); rec.Code != http.StatusOK {
 		t.Errorf("the original session's condominium still logs in: %d", rec.Code)

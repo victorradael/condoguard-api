@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/victorradael/condoguard/api/internal/audit"
 	"github.com/victorradael/condoguard/api/internal/authz"
 	"github.com/victorradael/condoguard/api/pkg/page"
 )
@@ -17,23 +18,32 @@ import (
 type Service struct {
 	repo  Repository
 	units authz.UnitResolver
+	trail audit.Trail
+}
+
+const auditResource = "notification"
+
+// WithAudit makes every change write its audit entry in the same transaction.
+func (s *Service) WithAudit(t audit.Trail) *Service {
+	s.trail = t
+	return s
 }
 
 // NewService creates a notification Service. units resolves which units and
 // shops a non-admin caller owns.
 func NewService(repo Repository, units authz.UnitResolver) *Service {
-	return &Service{repo: repo, units: units}
+	return &Service{repo: repo, units: units, trail: audit.NewTrail()}
 }
 
 // Create validates the request and persists the notification.
 // Business rules:
-//   - admins only
+//   - needs notifications.write
 //   - the author (createdById) is the authenticated user
 //   - message is required
 //   - at least one recipient (residentId or shopOwnerId) is required
 //   - new notifications start unread for every recipient
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*Notification, error) {
-	p, err := authz.RequireAdmin(ctx)
+	p, err := authz.Require(ctx, authz.PermNotificationsWrite)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +68,13 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Notification,
 		n.ShopOwnerIDs = []string{}
 	}
 
-	if err := s.repo.Save(ctx, n); err != nil {
+	err = s.trail.Atomic(ctx, func(ctx context.Context) (audit.Entry, error) {
+		if err = s.repo.Save(ctx, n); err != nil {
+			return audit.Entry{}, err
+		}
+		return audit.Entry{Action: audit.ActionCreate, Resource: auditResource, ResourceID: n.ID, After: n}, nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return n, nil
@@ -67,7 +83,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Notification,
 // GetByID returns the notification, with the caller's read state, if the
 // caller may see it; ErrNotFound otherwise.
 func (s *Service) GetByID(ctx context.Context, id string) (*Notification, error) {
-	p, scope, err := authz.ScopeFor(ctx, s.units)
+	p, scope, err := authz.ScopeFor(ctx, s.units, authz.PermNotificationsReadAll)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +99,7 @@ func (s *Service) GetByID(ctx context.Context, id string) (*Notification, error)
 
 // List returns one page of the notifications the caller may see, newest first.
 func (s *Service) List(ctx context.Context, pg page.Params) (page.Result[*Notification], error) {
-	p, scope, err := authz.ScopeFor(ctx, s.units)
+	p, scope, err := authz.ScopeFor(ctx, s.units, authz.PermNotificationsReadAll)
 	if err != nil {
 		return page.Result[*Notification]{}, err
 	}
@@ -94,12 +110,12 @@ func (s *Service) List(ctx context.Context, pg page.Params) (page.Result[*Notifi
 	return page.New(list, pg, total), nil
 }
 
-// Update applies message and recipient list changes. Admins only.
+// Update applies message and recipient list changes. Needs notifications.write.
 // A recipient list present in the body replaces the stored one, even when
 // empty ([] clears it); an absent (or null) list is kept. The notification
 // must still have at least one recipient afterwards.
 func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*Notification, error) {
-	p, err := authz.RequireAdmin(ctx)
+	p, err := authz.Require(ctx, authz.PermNotificationsWrite)
 	if err != nil {
 		return nil, err
 	}
@@ -107,6 +123,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*No
 	if err != nil {
 		return nil, err
 	}
+	before := *n
 
 	if req.Message != "" {
 		n.Message = req.Message
@@ -121,7 +138,13 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*No
 		return nil, fmt.Errorf("%w: at least one recipient (residentId or shopOwnerId) is required", ErrValidation)
 	}
 
-	if err := s.repo.Update(ctx, n); err != nil {
+	err = s.trail.Atomic(ctx, func(ctx context.Context) (audit.Entry, error) {
+		if err = s.repo.Update(ctx, n); err != nil {
+			return audit.Entry{}, err
+		}
+		return audit.Entry{Action: audit.ActionUpdate, Resource: auditResource, ResourceID: n.ID, Before: before, After: n}, nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return n, nil
@@ -152,10 +175,20 @@ func (s *Service) MarkAsRead(ctx context.Context, id string) (*Notification, err
 	return n, nil
 }
 
-// Delete removes the notification. Admins only.
+// Delete removes the notification. Needs notifications.write.
 func (s *Service) Delete(ctx context.Context, id string) error {
-	if _, err := authz.RequireAdmin(ctx); err != nil {
+	p, err := authz.Require(ctx, authz.PermNotificationsWrite)
+	if err != nil {
 		return err
 	}
-	return s.repo.Delete(ctx, id)
+	return s.trail.Atomic(ctx, func(ctx context.Context) (audit.Entry, error) {
+		before, err := s.repo.FindByID(ctx, id, p.UserID)
+		if err != nil {
+			return audit.Entry{}, err
+		}
+		if err = s.repo.Delete(ctx, id); err != nil {
+			return audit.Entry{}, err
+		}
+		return audit.Entry{Action: audit.ActionDelete, Resource: auditResource, ResourceID: id, Before: before}, nil
+	})
 }

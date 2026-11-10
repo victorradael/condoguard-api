@@ -27,9 +27,10 @@ func findAll(t *testing.T, repo expense.Repository, ctx context.Context, f expen
 }
 
 func TestPostgresRepository_Expense(t *testing.T) {
-	repo := expense.NewPostgresRepository(dbtest.NewPool(t))
-	ctxA := tenant.WithCondominiumID(context.Background(), "condo-a")
-	ctxB := tenant.WithCondominiumID(context.Background(), "condo-b")
+	env := dbtest.NewEnv(t)
+	repo := expense.NewPostgresRepository(env.Pool)
+	ctxA := tenant.WithCondominiumID(context.Background(), env.Condo("condo-a"))
+	ctxB := tenant.WithCondominiumID(context.Background(), env.Condo("condo-b"))
 
 	day := func(d int) time.Time { return time.Date(2026, 3, d, 0, 0, 0, 0, time.UTC) }
 	// Saved out of order to check the due-date ordering.
@@ -144,7 +145,7 @@ func TestPostgresRepository_Expense(t *testing.T) {
 		if err != nil || total != 1 || len(list) != 1 || list[0].Description != "outro" {
 			t.Fatalf("condo-b: expected only its own expense, got %+v total %d (%v)", list, total, err)
 		}
-		if list := findAll(t, repo, tenant.WithCondominiumID(context.Background(), "condo-c"), expense.Filter{Scope: all}); len(list) != 0 {
+		if list := findAll(t, repo, tenant.WithCondominiumID(context.Background(), "c0000000-0000-4000-8000-00000000000c"), expense.Filter{Scope: all}); len(list) != 0 {
 			t.Errorf("condo-c: expected nothing, got %+v", list)
 		}
 	})

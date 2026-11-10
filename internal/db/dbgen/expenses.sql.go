@@ -24,7 +24,7 @@ WHERE condominium_id = $1
 `
 
 type CountExpensesParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	DueFrom       *time.Time
 	DueTo         *time.Time
 	Restricted    bool
@@ -52,7 +52,7 @@ WHERE condominium_id = $1 AND id = $2
 `
 
 type DeleteExpenseParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	ID            uuid.UUID
 }
 
@@ -65,13 +65,13 @@ func (q *Queries) DeleteExpense(ctx context.Context, arg DeleteExpenseParams) (i
 }
 
 const getExpenseByID = `-- name: GetExpenseByID :one
-SELECT id, condominium_id, description, amount_cents, due_date, resident_id, shop_owner_id, created_at
+SELECT id, description, amount_cents, due_date, resident_id, shop_owner_id, created_at, condominium_id
 FROM expenses
 WHERE condominium_id = $1 AND id = $2
 `
 
 type GetExpenseByIDParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	ID            uuid.UUID
 }
 
@@ -80,13 +80,13 @@ func (q *Queries) GetExpenseByID(ctx context.Context, arg GetExpenseByIDParams) 
 	var i Expense
 	err := row.Scan(
 		&i.ID,
-		&i.CondominiumID,
 		&i.Description,
 		&i.AmountCents,
 		&i.DueDate,
 		&i.ResidentID,
 		&i.ShopOwnerID,
 		&i.CreatedAt,
+		&i.CondominiumID,
 	)
 	return i, err
 }
@@ -98,7 +98,7 @@ RETURNING id
 `
 
 type InsertExpenseParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	Description   string
 	AmountCents   int64
 	DueDate       time.Time
@@ -121,7 +121,7 @@ func (q *Queries) InsertExpense(ctx context.Context, arg InsertExpenseParams) (u
 }
 
 const listExpenses = `-- name: ListExpenses :many
-SELECT id, condominium_id, description, amount_cents, due_date, resident_id, shop_owner_id, created_at
+SELECT id, description, amount_cents, due_date, resident_id, shop_owner_id, created_at, condominium_id
 FROM expenses
 WHERE condominium_id = $1
   AND ($2::timestamptz IS NULL OR due_date >= $2::timestamptz)
@@ -134,7 +134,7 @@ LIMIT $8 OFFSET $7
 `
 
 type ListExpensesParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	DueFrom       *time.Time
 	DueTo         *time.Time
 	Restricted    bool
@@ -166,13 +166,13 @@ func (q *Queries) ListExpenses(ctx context.Context, arg ListExpensesParams) ([]E
 		var i Expense
 		if err := rows.Scan(
 			&i.ID,
-			&i.CondominiumID,
 			&i.Description,
 			&i.AmountCents,
 			&i.DueDate,
 			&i.ResidentID,
 			&i.ShopOwnerID,
 			&i.CreatedAt,
+			&i.CondominiumID,
 		); err != nil {
 			return nil, err
 		}
@@ -197,7 +197,7 @@ type UpdateExpenseParams struct {
 	DueDate       time.Time
 	ResidentID    string
 	ShopOwnerID   string
-	CondominiumID string
+	CondominiumID uuid.UUID
 	ID            uuid.UUID
 }
 

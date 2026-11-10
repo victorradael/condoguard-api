@@ -1,10 +1,14 @@
 // Package authz holds the authorization rules shared by the domain services:
-// who is calling (Principal) and which units they own (Units).
+// who is calling (Principal), what their roles in the current condominium
+// allow (the permission matrix) and which units they own (Units).
 //
-// Roles: ROLE_ADMIN manages the condominium (síndico/administração) and sees
-// everything in it; ROLE_USER is a resident or shop owner and only sees the
-// records tied to the units they own. Data from other condominiums is never
-// visible: the repositories filter by the tenant in the context.
+// Roles belong to the membership of a person in a condominium, so one person
+// can be síndico in one condominium and morador in another. The token carries
+// the roles of the condominium it was issued for. A morador (and any role
+// without the *ReadAll permission) only sees the records tied to the units
+// they own. Data from other condominiums is never visible: the repositories
+// filter by the tenant in the context and PostgreSQL Row-Level Security does
+// it again. The matrix is documented in docs/PAPEIS_E_PERMISSOES.md.
 package authz
 
 import (
@@ -16,11 +20,45 @@ import (
 	"github.com/victorradael/condoguard/api/internal/middleware"
 )
 
-// Role names stored in users.roles and in the token.
+// Roles of a membership (memberships.roles).
 const (
-	RoleAdmin = "ROLE_ADMIN"
-	RoleUser  = "ROLE_USER"
+	RoleAdministradora = "administradora"
+	RoleSindico        = "sindico"
+	RoleConselho       = "conselho"
+	RolePorteiro       = "porteiro"
+	RoleMorador        = "morador"
 )
+
+// Roles lists every role, from the broadest to the narrowest.
+var Roles = []string{RoleAdministradora, RoleSindico, RoleConselho, RolePorteiro, RoleMorador}
+
+// Permission is one thing a role may do inside a condominium.
+type Permission string
+
+// Permissions checked by the services.
+const (
+	PermCondominiumManage    Permission = "condominium.manage"
+	PermUsersManage          Permission = "users.manage"
+	PermUsersRead            Permission = "users.read"
+	PermUnitsWrite           Permission = "units.write"
+	PermUnitsReadAll         Permission = "units.read_all"
+	PermExpensesWrite        Permission = "expenses.write"
+	PermExpensesReadAll      Permission = "expenses.read_all"
+	PermNotificationsWrite   Permission = "notifications.write"
+	PermNotificationsReadAll Permission = "notifications.read_all"
+	PermAuditRead            Permission = "audit.read"
+)
+
+// Matrix says which permissions each role holds. Anything not listed is denied.
+var Matrix = map[string][]Permission{
+	RoleAdministradora: {PermCondominiumManage, PermUsersManage, PermUsersRead, PermUnitsWrite, PermUnitsReadAll,
+		PermExpensesWrite, PermExpensesReadAll, PermNotificationsWrite, PermNotificationsReadAll, PermAuditRead},
+	RoleSindico: {PermUsersManage, PermUsersRead, PermUnitsWrite, PermUnitsReadAll,
+		PermExpensesWrite, PermExpensesReadAll, PermNotificationsWrite, PermNotificationsReadAll, PermAuditRead},
+	RoleConselho: {PermUsersRead, PermUnitsReadAll, PermExpensesReadAll, PermNotificationsReadAll, PermAuditRead},
+	RolePorteiro: {PermUnitsReadAll},
+	RoleMorador:  {},
+}
 
 // ErrForbidden is returned when the caller may not perform the operation.
 var ErrForbidden = errors.New("authz: forbidden")
@@ -33,7 +71,7 @@ var ErrUnauthenticated = errors.New("authz: no authenticated user")
 func Status(err error) (status int, msg string, ok bool) {
 	switch {
 	case errors.Is(err, ErrForbidden):
-		return http.StatusForbidden, "admin role required", true
+		return http.StatusForbidden, "insufficient role", true
 	case errors.Is(err, ErrUnauthenticated):
 		return http.StatusUnauthorized, "authentication required", true
 	}
@@ -41,7 +79,17 @@ func Status(err error) (status int, msg string, ok bool) {
 }
 
 // ValidRole reports whether role is one the API knows.
-func ValidRole(role string) bool { return role == RoleAdmin || role == RoleUser }
+func ValidRole(role string) bool { return slices.Contains(Roles, role) }
+
+// RolesCan reports whether any of the roles holds the permission.
+func RolesCan(roles []string, perm Permission) bool {
+	for _, r := range roles {
+		if slices.Contains(Matrix[r], perm) {
+			return true
+		}
+	}
+	return false
+}
 
 // Principal is the authenticated caller.
 type Principal struct {
@@ -49,17 +97,17 @@ type Principal struct {
 	Roles  []string
 }
 
-// IsAdmin reports whether the caller manages the condominium.
-func (p Principal) IsAdmin() bool { return slices.Contains(p.Roles, RoleAdmin) }
+// Can reports whether the caller's roles grant the permission.
+func (p Principal) Can(perm Permission) bool { return RolesCan(p.Roles, perm) }
 
 // OperatorID is the caller recorded by AsOperator.
 const OperatorID = "operator"
 
-// AsOperator returns ctx acting as a condominium admin, for trusted tools
+// AsOperator returns ctx acting as the administradora of the condominium, for trusted tools
 // that already hold database credentials (cmd/createadmin bootstraps the
 // first admin this way). Never call it on a request path.
 func AsOperator(ctx context.Context) context.Context {
-	return middleware.WithIdentity(ctx, OperatorID, []string{RoleAdmin})
+	return middleware.WithIdentity(ctx, OperatorID, []string{RoleAdministradora})
 }
 
 // FromContext returns the caller set by the authentication middleware.
@@ -71,13 +119,13 @@ func FromContext(ctx context.Context) (Principal, error) {
 	return Principal{UserID: id, Roles: middleware.RolesFromContext(ctx)}, nil
 }
 
-// RequireAdmin returns the caller if they are an admin, ErrForbidden otherwise.
-func RequireAdmin(ctx context.Context) (Principal, error) {
+// Require returns the caller if their roles grant perm, ErrForbidden otherwise.
+func Require(ctx context.Context, perm Permission) (Principal, error) {
 	p, err := FromContext(ctx)
 	if err != nil {
 		return p, err
 	}
-	if !p.IsAdmin() {
+	if !p.Can(perm) {
 		return p, ErrForbidden
 	}
 	return p, nil
@@ -111,19 +159,20 @@ func (f UnitResolverFunc) UnitsOwnedBy(ctx context.Context, userID string) (Unit
 }
 
 // Scope says which records of a list the caller may see.
-// All = true for admins; otherwise only records tied to Units.
+// All = true when the caller holds the read-all permission of the resource;
+// otherwise only records tied to Units.
 type Scope struct {
 	All   bool
 	Units Units
 }
 
 // ScopeFor builds the list scope of the caller in ctx.
-func ScopeFor(ctx context.Context, units UnitResolver) (Principal, Scope, error) {
+func ScopeFor(ctx context.Context, units UnitResolver, readAll Permission) (Principal, Scope, error) {
 	p, err := FromContext(ctx)
 	if err != nil {
 		return p, Scope{}, err
 	}
-	if p.IsAdmin() {
+	if p.Can(readAll) {
 		return p, Scope{All: true}, nil
 	}
 	u, err := units.UnitsOwnedBy(ctx, p.UserID)
@@ -150,6 +199,36 @@ func (s Scope) SeesAny(residentIDs, shopOwnerIDs []string) bool {
 	}
 	for _, id := range shopOwnerIDs {
 		if s.Units.HasShopOwner(id) {
+			return true
+		}
+	}
+	return false
+}
+
+// RequirePermission is a route guard: 403 unless the caller's roles grant
+// perm. It must run after the authentication middleware.
+func RequirePermission(perm Permission) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !RolesCan(middleware.RolesFromContext(r.Context()), perm) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"error":"insufficient role"}`))
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// MFARoles are the roles that must sign in with a second factor: whoever
+// manages or oversees a condominium (administradora, síndico, conselho).
+var MFARoles = []string{RoleAdministradora, RoleSindico, RoleConselho}
+
+// RequiresMFA reports whether any of the roles must use a second factor.
+func RequiresMFA(roles []string) bool {
+	for _, r := range roles {
+		if slices.Contains(MFARoles, r) {
 			return true
 		}
 	}

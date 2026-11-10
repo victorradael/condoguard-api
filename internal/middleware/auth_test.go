@@ -92,7 +92,7 @@ func TestMiddleware_InvalidToken_Returns401(t *testing.T) {
 
 func TestMiddleware_TokenSignedWithWrongSecret_Returns401(t *testing.T) {
 	otherSvc := pkgjwt.MustNewService("b3RoZXItc2VjcmV0LWtleS1mb3ItdGVzdGluZy0zMmJ5dGVz")
-	token, _ := otherSvc.GenerateToken("user-123", "condo-a", []string{"ROLE_USER"})
+	token, _ := otherSvc.GenerateToken("user-123", "condo-a", []string{"morador"})
 
 	mw := newMiddleware()
 	handler := mw(protectedHandler())
@@ -109,7 +109,7 @@ func TestMiddleware_TokenSignedWithWrongSecret_Returns401(t *testing.T) {
 
 func TestMiddleware_ExpiredToken_Returns401(t *testing.T) {
 	expiredSvc, _ := pkgjwt.NewServiceWithExpiry(testSecret, -1*time.Hour)
-	token, _ := expiredSvc.GenerateToken("user-123", "condo-a", []string{"ROLE_USER"})
+	token, _ := expiredSvc.GenerateToken("user-123", "condo-a", []string{"morador"})
 
 	mw := newMiddleware()
 	handler := mw(protectedHandler())
@@ -126,7 +126,7 @@ func TestMiddleware_ExpiredToken_Returns401(t *testing.T) {
 
 func TestMiddleware_ValidToken_PassesThrough(t *testing.T) {
 	jwtSvc := pkgjwt.MustNewService(testSecret)
-	token, _ := jwtSvc.GenerateToken("user-123", "condo-a", []string{"ROLE_USER"})
+	token, _ := jwtSvc.GenerateToken("user-123", "condo-a", []string{"morador"})
 
 	mw := newMiddleware()
 	handler := mw(protectedHandler())
@@ -141,7 +141,7 @@ func TestMiddleware_ValidToken_PassesThrough(t *testing.T) {
 
 func TestMiddleware_ValidToken_UserIDInContext(t *testing.T) {
 	jwtSvc := pkgjwt.MustNewService(testSecret)
-	token, _ := jwtSvc.GenerateToken("user-abc", "condo-a", []string{"ROLE_USER"})
+	token, _ := jwtSvc.GenerateToken("user-abc", "condo-a", []string{"morador"})
 
 	mw := newMiddleware()
 	var capturedUserID string
@@ -164,7 +164,7 @@ func TestMiddleware_ValidToken_UserIDInContext(t *testing.T) {
 // deployment default), so an authenticated user only ever queries their own.
 func TestMiddleware_TenantComesFromToken(t *testing.T) {
 	jwtSvc := pkgjwt.MustNewService(testSecret)
-	token, _ := jwtSvc.GenerateToken("user-1", "condo-b", []string{"ROLE_USER"})
+	token, _ := jwtSvc.GenerateToken("user-1", "condo-b", []string{"morador"})
 
 	var got string
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +191,7 @@ func cookieRequest(method, token, origin string) *http.Request {
 
 func TestMiddleware_Cookie_GetPassesThrough(t *testing.T) {
 	jwtSvc := pkgjwt.MustNewService(testSecret)
-	token, _ := jwtSvc.GenerateToken("user-1", "condo-a", []string{"ROLE_USER"})
+	token, _ := jwtSvc.GenerateToken("user-1", "condo-a", []string{"morador"})
 	h := middleware.Authenticate(jwtSvc, "http://localhost:3000")(protectedHandler())
 
 	rec := httptest.NewRecorder()
@@ -206,7 +206,7 @@ func TestMiddleware_Cookie_GetPassesThrough(t *testing.T) {
 // is not checked.
 func TestMiddleware_Cookie_UnsafeMethodNeedsAllowedOrigin(t *testing.T) {
 	jwtSvc := pkgjwt.MustNewService(testSecret)
-	token, _ := jwtSvc.GenerateToken("user-1", "condo-a", []string{"ROLE_USER"})
+	token, _ := jwtSvc.GenerateToken("user-1", "condo-a", []string{"morador"})
 	h := middleware.Authenticate(jwtSvc, "http://localhost:3000")(protectedHandler())
 
 	for origin, want := range map[string]int{
@@ -246,7 +246,7 @@ func TestMiddleware_Cookie_InvalidTokenReturns401(t *testing.T) {
 // A malformed Authorization header is an error, never a silent fallback to the cookie.
 func TestMiddleware_MalformedHeaderDoesNotFallBackToCookie(t *testing.T) {
 	jwtSvc := pkgjwt.MustNewService(testSecret)
-	token, _ := jwtSvc.GenerateToken("user-1", "condo-a", []string{"ROLE_USER"})
+	token, _ := jwtSvc.GenerateToken("user-1", "condo-a", []string{"morador"})
 	req := cookieRequest(http.MethodGet, token, "")
 	req.Header.Set("Authorization", "Basic abc")
 	rec := httptest.NewRecorder()
@@ -260,8 +260,8 @@ func TestMiddleware_MalformedHeaderDoesNotFallBackToCookie(t *testing.T) {
 
 func TestRequireRole(t *testing.T) {
 	jwtSvc := pkgjwt.MustNewService(testSecret)
-	h := middleware.Authenticate(jwtSvc)(middleware.RequireRole("ROLE_ADMIN")(protectedHandler()))
-	for roles, want := range map[string]int{"ROLE_ADMIN": http.StatusOK, "ROLE_USER": http.StatusForbidden} {
+	h := middleware.Authenticate(jwtSvc)(middleware.RequireRole("sindico")(protectedHandler()))
+	for roles, want := range map[string]int{"sindico": http.StatusOK, "morador": http.StatusForbidden} {
 		token, _ := jwtSvc.GenerateToken("u", "condo-a", []string{roles})
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, bearerRequest(token))

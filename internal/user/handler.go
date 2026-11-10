@@ -11,21 +11,21 @@ import (
 )
 
 // NewHandler wires the user routes behind the provided auth middleware.
-// GET /users/me is open to any authenticated user; every other route
-// requires ROLE_ADMIN.
+// GET /users/me is open to any authenticated user; the other routes are
+// checked by the service against the permission matrix (users.read for
+// reading, users.manage for changes).
 func NewHandler(svc *Service, authMW func(http.Handler) http.Handler) http.Handler {
 	h := &handler{svc: svc}
 
-	admin := http.NewServeMux()
-	admin.HandleFunc("GET /users", h.list)
-	admin.HandleFunc("POST /users", h.create)
-	admin.HandleFunc("GET /users/{id}", h.getByID)
-	admin.HandleFunc("PUT /users/{id}", h.update)
-	admin.HandleFunc("DELETE /users/{id}", h.delete)
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /users/me", h.me)
-	mux.Handle("/", requireAdmin(admin))
+	mux.HandleFunc("GET /users", h.list)
+	mux.HandleFunc("POST /users", h.create)
+	mux.HandleFunc("GET /users/{id}", h.getByID)
+	mux.HandleFunc("PUT /users/{id}", h.update)
+	mux.HandleFunc("DELETE /users/{id}", h.delete)
+	mux.HandleFunc("POST /users/{id}/account-links", h.issueLink)
+	mux.HandleFunc("DELETE /users/{id}/2fa", h.resetTwoFactor)
 
 	return authMW(mux)
 }
@@ -47,21 +47,6 @@ func (h *handler) me(w http.ResponseWriter, r *http.Request) {
 
 type handler struct {
 	svc *Service
-}
-
-// requireAdmin is a middleware that enforces ROLE_ADMIN on every request.
-// It expects the JWT middleware to have already run and populated the context.
-func requireAdmin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		roles := middleware.RolesFromContext(r.Context())
-		for _, role := range roles {
-			if role == "ROLE_ADMIN" {
-				next.ServeHTTP(w, r)
-				return
-			}
-		}
-		writeError(w, http.StatusForbidden, "admin role required")
-	})
 }
 
 func (h *handler) list(w http.ResponseWriter, r *http.Request) {
@@ -102,13 +87,13 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) getByID(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	u, err := h.svc.GetByID(r.Context(), id)
+	u, err := h.svc.Get(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			writeError(w, http.StatusNotFound, "user not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "internal error")
+		failed(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, u)

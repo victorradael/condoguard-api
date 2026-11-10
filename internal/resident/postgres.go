@@ -25,11 +25,11 @@ type postgresRepository struct {
 // as condominium_ref and keeps scoping the unit-number uniqueness exactly as
 // before. In 1b it becomes the tenant itself.
 func NewPostgresRepository(pool *pgxpool.Pool) Repository {
-	return &postgresRepository{q: dbgen.New(pool)}
+	return &postgresRepository{q: db.Queries(pool)}
 }
 
 func (r *postgresRepository) Save(ctx context.Context, res *Resident) error {
-	condoID, err := tenant.CondominiumID(ctx)
+	condoID, err := tenant.UUID(ctx)
 	if err != nil {
 		return err
 	}
@@ -55,7 +55,7 @@ func (r *postgresRepository) Save(ctx context.Context, res *Resident) error {
 }
 
 func (r *postgresRepository) FindByID(ctx context.Context, id string) (*Resident, error) {
-	condoID, err := tenant.CondominiumID(ctx)
+	condoID, err := tenant.UUID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (r *postgresRepository) FindByID(ctx context.Context, id string) (*Resident
 }
 
 func (r *postgresRepository) FindAll(ctx context.Context, ownerID string, p page.Params) ([]*Resident, int64, error) {
-	condoID, err := tenant.CondominiumID(ctx)
+	condoID, err := tenant.UUID(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -100,7 +100,7 @@ func (r *postgresRepository) FindAll(ctx context.Context, ownerID string, p page
 }
 
 func (r *postgresRepository) IDsByOwner(ctx context.Context, ownerID string) ([]string, error) {
-	condoID, err := tenant.CondominiumID(ctx)
+	condoID, err := tenant.UUID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +116,7 @@ func (r *postgresRepository) IDsByOwner(ctx context.Context, ownerID string) ([]
 }
 
 func (r *postgresRepository) Update(ctx context.Context, res *Resident) error {
-	condoID, err := tenant.CondominiumID(ctx)
+	condoID, err := tenant.UUID(ctx)
 	if err != nil {
 		return err
 	}
@@ -149,7 +149,7 @@ func (r *postgresRepository) Update(ctx context.Context, res *Resident) error {
 }
 
 func (r *postgresRepository) Delete(ctx context.Context, id string) error {
-	condoID, err := tenant.CondominiumID(ctx)
+	condoID, err := tenant.UUID(ctx)
 	if err != nil {
 		return err
 	}
@@ -168,7 +168,7 @@ func (r *postgresRepository) Delete(ctx context.Context, id string) error {
 }
 
 func (r *postgresRepository) ExistsUnit(ctx context.Context, condominiumID, unitNumber, excludeID string) (bool, error) {
-	condoID, err := tenant.CondominiumID(ctx)
+	condoID, err := tenant.UUID(ctx)
 	if err != nil {
 		return false, err
 	}

@@ -14,59 +14,70 @@ import (
 )
 
 func TestPostgresRepository_Auth(t *testing.T) {
-	repo := auth.NewPostgresRepository(dbtest.NewPool(t))
-	ctxA := tenant.WithCondominiumID(context.Background(), "condo-a")
-	ctxB := tenant.WithCondominiumID(context.Background(), "condo-b")
+	env := dbtest.NewEnv(t)
+	repo := auth.NewPostgresRepository(env.Pool)
+	ctxA := tenant.WithCondominiumID(context.Background(), env.Condo("condo-a"))
+	ctxB := tenant.WithCondominiumID(context.Background(), env.Condo("condo-b"))
 
-	u := &auth.User{Username: "bia", Email: "bia@exemplo.test", Password: "hash", Roles: []string{"ROLE_USER"}}
+	u := &auth.User{Username: "bia", Email: "bia@exemplo.test", Password: "hash", Roles: []string{"morador"}}
 	if err := repo.Save(ctxA, u); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	// E-mail is unique across the whole database, not only per condominium.
 	for _, ctx := range []context.Context{ctxA, ctxB} {
-		if err := repo.Save(ctx, &auth.User{Username: "bia2", Email: "bia@exemplo.test", Password: "h"}); !errors.Is(err, auth.ErrDuplicateEmail) {
+		if err := repo.Save(ctx, &auth.User{Username: "bia2", Email: "bia@exemplo.test", Password: "h", Roles: []string{"morador"}}); !errors.Is(err, auth.ErrDuplicateEmail) {
 			t.Errorf("expected ErrDuplicateEmail, got %v", err)
 		}
 	}
 	// Usernames may repeat: they are display names now.
-	if err := repo.Save(ctxA, &auth.User{Username: "bia", Email: "bia-2@exemplo.test", Password: "h"}); err != nil {
+	if err := repo.Save(ctxA, &auth.User{Username: "bia", Email: "bia-2@exemplo.test", Password: "h", Roles: []string{"morador"}}); err != nil {
 		t.Errorf("duplicate username must be accepted: %v", err)
 	}
 
-	got, err := repo.FindByEmail(ctxA, "bia@exemplo.test")
-	if err != nil || got.ID != u.ID || got.Password != "hash" || got.CondominiumID != "condo-a" {
-		t.Fatalf("FindByEmail: %+v, %v", got, err)
+	// Login happens before the condominium is known: the account is found in the
+	// whole base, with or without a tenant, and its memberships say where it belongs.
+	for name, ctx := range map[string]context.Context{"condo-a": ctxA, "condo-b": ctxB, "no tenant": context.Background()} {
+		got, err := repo.FindByEmail(ctx, "bia@exemplo.test")
+		if err != nil || got.ID != u.ID || got.Password != "hash" {
+			t.Fatalf("FindByEmail (%s): %+v, %v", name, got, err)
+		}
 	}
-	if got, err := repo.FindByID(ctxA, u.ID); err != nil || got.Email != u.Email {
+	if _, err := repo.FindByEmail(ctxA, "nobody@exemplo.test"); !errors.Is(err, auth.ErrNotFound) {
+		t.Errorf("unknown e-mail: expected ErrNotFound, got %v", err)
+	}
+	ms, err := repo.Memberships(context.Background(), u.ID)
+	if err != nil || len(ms) != 1 || ms[0].CondominiumID != u.CondominiumID || len(ms[0].Roles) != 1 || ms[0].Roles[0] != "morador" {
+		t.Fatalf("Memberships: %+v, %v", ms, err)
+	}
+	if got, err := repo.FindByID(ctxA, u.ID); err != nil || got.Email != u.Email || got.CondominiumID != u.CondominiumID || got.Roles[0] != "morador" {
 		t.Fatalf("FindByID: %+v, %v", got, err)
-	}
-	if _, err := repo.FindByEmail(ctxB, "bia@exemplo.test"); !errors.Is(err, auth.ErrNotFound) {
-		t.Errorf("other condominium: expected ErrNotFound, got %v", err)
 	}
 	if _, err := repo.FindByID(ctxB, u.ID); !errors.Is(err, auth.ErrNotFound) {
 		t.Errorf("other condominium: expected ErrNotFound, got %v", err)
 	}
-	if _, err := repo.FindByEmail(context.Background(), "bia@exemplo.test"); !errors.Is(err, tenant.ErrMissing) {
+	if _, err := repo.FindByID(context.Background(), u.ID); !errors.Is(err, tenant.ErrMissing) {
 		t.Errorf("missing tenant: expected ErrMissing, got %v", err)
 	}
 }
 
 // The database itself rejects e-mails that are not normalised.
 func TestPostgres_EmailMustBeNormalised(t *testing.T) {
-	repo := auth.NewPostgresRepository(dbtest.NewPool(t))
-	ctx := tenant.WithCondominiumID(context.Background(), "condo-a")
-	if err := repo.Save(ctx, &auth.User{Username: "x", Email: "Upper@Exemplo.test", Password: "h"}); err == nil {
+	env := dbtest.NewEnv(t)
+	repo := auth.NewPostgresRepository(env.Pool)
+	ctx := tenant.WithCondominiumID(context.Background(), env.Condo("condo-a"))
+	if err := repo.Save(ctx, &auth.User{Username: "x", Email: "Upper@Exemplo.test", Password: "h", Roles: []string{"morador"}}); err == nil {
 		t.Error("expected the CHECK constraint to reject a mixed-case e-mail")
 	}
 }
 
 func TestPostgresTokenStore(t *testing.T) {
-	pool := dbtest.NewPool(t)
+	env := dbtest.NewEnv(t)
+	pool := env.Pool
 	repo, store := auth.NewPostgresRepository(pool), auth.NewPostgresTokenStore(pool)
-	ctxA := tenant.WithCondominiumID(context.Background(), "condo-a")
-	ctxB := tenant.WithCondominiumID(context.Background(), "condo-b")
+	ctxA := tenant.WithCondominiumID(context.Background(), env.Condo("condo-a"))
+	ctxB := tenant.WithCondominiumID(context.Background(), env.Condo("condo-b"))
 
-	u := &auth.User{Username: "c", Email: "c@exemplo.test", Password: "h", Roles: []string{"ROLE_USER"}}
+	u := &auth.User{Username: "c", Email: "c@exemplo.test", Password: "h", Roles: []string{"morador"}}
 	if err := repo.Save(ctxA, u); err != nil {
 		t.Fatal(err)
 	}

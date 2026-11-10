@@ -3,6 +3,7 @@ package user
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/victorradael/condoguard/api/internal/db"
@@ -12,26 +13,29 @@ import (
 )
 
 type postgresRepository struct {
-	q *dbgen.Queries
+	pool *pgxpool.Pool
+	q    *dbgen.Queries
 }
 
 // NewPostgresRepository returns a Repository backed by the shared pgx pool.
-// Every query is scoped by the condominium ID carried in the context.
+// An account is global; the roles belong to its membership in the condominium
+// carried in the context, and every query is scoped by that condominium.
 func NewPostgresRepository(pool *pgxpool.Pool) Repository {
-	return &postgresRepository{q: dbgen.New(pool)}
+	return &postgresRepository{pool: pool, q: db.Queries(pool)}
 }
 
+// Save creates the account and its membership in one transaction.
 func (r *postgresRepository) Save(ctx context.Context, u *User) error {
-	condoID, err := tenant.CondominiumID(ctx)
+	condoID, err := tenant.UUID(ctx)
 	if err != nil {
 		return err
 	}
-	id, err := r.q.InsertUser(ctx, dbgen.InsertUserParams{
-		CondominiumID: condoID,
-		Username:      u.Username,
-		Email:         u.Email,
-		PasswordHash:  u.Password,
-		Roles:         nonNil(u.Roles),
+	id := uuid.New()
+	err = db.InTx(ctx, r.pool, func(ctx context.Context) error {
+		if ierr := r.q.InsertUser(ctx, dbgen.InsertUserParams{ID: id, Username: u.Username, Email: u.Email, PasswordHash: u.Password}); ierr != nil {
+			return ierr
+		}
+		return r.q.InsertMembership(ctx, dbgen.InsertMembershipParams{UserID: id, CondominiumID: condoID, Roles: nonNil(u.Roles)})
 	})
 	if db.IsUniqueViolation(err) {
 		return ErrDuplicate
@@ -44,7 +48,7 @@ func (r *postgresRepository) Save(ctx context.Context, u *User) error {
 }
 
 func (r *postgresRepository) FindByID(ctx context.Context, id string) (*User, error) {
-	condoID, err := tenant.CondominiumID(ctx)
+	condoID, err := tenant.UUID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -59,11 +63,11 @@ func (r *postgresRepository) FindByID(ctx context.Context, id string) (*User, er
 	if err != nil {
 		return nil, err
 	}
-	return fromRow(row), nil
+	return fromRow(row.ID, row.Username, row.Email, row.PasswordHash, row.Roles), nil
 }
 
 func (r *postgresRepository) FindAll(ctx context.Context, p page.Params) ([]*User, int64, error) {
-	condoID, err := tenant.CondominiumID(ctx)
+	condoID, err := tenant.UUID(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -77,13 +81,14 @@ func (r *postgresRepository) FindAll(ctx context.Context, p page.Params) ([]*Use
 	}
 	list := make([]*User, 0, len(rows))
 	for _, row := range rows {
-		list = append(list, fromRow(row))
+		list = append(list, fromRow(row.ID, row.Username, row.Email, row.PasswordHash, row.Roles))
 	}
 	return list, total, nil
 }
 
+// Update changes the account's name and the roles of the membership together.
 func (r *postgresRepository) Update(ctx context.Context, u *User) error {
-	condoID, err := tenant.CondominiumID(ctx)
+	condoID, err := tenant.UUID(ctx)
 	if err != nil {
 		return err
 	}
@@ -91,36 +96,34 @@ func (r *postgresRepository) Update(ctx context.Context, u *User) error {
 	if !ok {
 		return ErrNotFound
 	}
-	n, err := r.q.UpdateUser(ctx, dbgen.UpdateUserParams{
-		CondominiumID: condoID,
-		ID:            uid,
-		Username:      u.Username,
-		Email:         u.Email,
-		PasswordHash:  u.Password,
-		Roles:         nonNil(u.Roles),
+	err = db.InTx(ctx, r.pool, func(ctx context.Context) error {
+		n, uerr := r.q.UpdateUser(ctx, dbgen.UpdateUserParams{
+			CondominiumID: condoID, ID: uid, Username: u.Username, Email: u.Email, PasswordHash: u.Password,
+		})
+		if uerr != nil {
+			return uerr
+		}
+		if n == 0 {
+			return ErrNotFound
+		}
+		_, err = r.q.UpdateMembershipRoles(ctx, dbgen.UpdateMembershipRolesParams{CondominiumID: condoID, UserID: uid, Roles: nonNil(u.Roles)})
+		return err
 	})
 	if db.IsUniqueViolation(err) {
 		return ErrDuplicate
 	}
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return err
 }
 
 func (r *postgresRepository) Delete(ctx context.Context, id string) error {
-	condoID, err := tenant.CondominiumID(ctx)
-	if err != nil {
+	if _, err := tenant.UUID(ctx); err != nil {
 		return err
 	}
 	uid, ok := db.ParseID(id)
 	if !ok {
 		return ErrNotFound
 	}
-	n, err := r.q.DeleteUser(ctx, dbgen.DeleteUserParams{CondominiumID: condoID, ID: uid})
+	n, err := r.q.RemoveMembership(ctx, uid)
 	if err != nil {
 		return err
 	}
@@ -131,7 +134,7 @@ func (r *postgresRepository) Delete(ctx context.Context, id string) error {
 }
 
 func (r *postgresRepository) RevokeSessions(ctx context.Context, id string) error {
-	condoID, err := tenant.CondominiumID(ctx)
+	condoID, err := tenant.UUID(ctx)
 	if err != nil {
 		return err
 	}
@@ -142,14 +145,8 @@ func (r *postgresRepository) RevokeSessions(ctx context.Context, id string) erro
 	return r.q.RevokeUserRefreshTokens(ctx, dbgen.RevokeUserRefreshTokensParams{CondominiumID: condoID, UserID: uid})
 }
 
-func fromRow(row dbgen.User) *User {
-	return &User{
-		ID:       row.ID.String(),
-		Username: row.Username,
-		Email:    row.Email,
-		Password: row.PasswordHash,
-		Roles:    row.Roles,
-	}
+func fromRow(id uuid.UUID, username, email, hash string, roles []string) *User {
+	return &User{ID: id.String(), Username: username, Email: email, Password: hash, Roles: roles}
 }
 
 func nonNil(s []string) []string {

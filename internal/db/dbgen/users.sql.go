@@ -7,154 +7,146 @@ package dbgen
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
 
 const countUsers = `-- name: CountUsers :one
 SELECT count(*)
-FROM users
+FROM memberships
 WHERE condominium_id = $1
 `
 
-func (q *Queries) CountUsers(ctx context.Context, condominiumID string) (int64, error) {
+func (q *Queries) CountUsers(ctx context.Context, condominiumID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countUsers, condominiumID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
-const deleteUser = `-- name: DeleteUser :execrows
-DELETE FROM users
-WHERE condominium_id = $1 AND id = $2
-`
-
-type DeleteUserParams struct {
-	CondominiumID string
-	ID            uuid.UUID
-}
-
-func (q *Queries) DeleteUser(ctx context.Context, arg DeleteUserParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteUser, arg.CondominiumID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, condominium_id, username, email, password_hash, roles, created_at
-FROM users
-WHERE condominium_id = $1 AND email = $2
-`
-
-type GetUserByEmailParams struct {
-	CondominiumID string
-	Email         string
-}
-
-func (q *Queries) GetUserByEmail(ctx context.Context, arg GetUserByEmailParams) (User, error) {
-	row := q.db.QueryRow(ctx, getUserByEmail, arg.CondominiumID, arg.Email)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.CondominiumID,
-		&i.Username,
-		&i.Email,
-		&i.PasswordHash,
-		&i.Roles,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, condominium_id, username, email, password_hash, roles, created_at
-FROM users
-WHERE condominium_id = $1 AND id = $2
+SELECT u.id, u.username, u.email, u.password_hash, u.created_at, m.condominium_id, m.roles
+FROM users u
+JOIN memberships m ON m.user_id = u.id
+WHERE m.condominium_id = $1 AND u.id = $2
 `
 
 type GetUserByIDParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	ID            uuid.UUID
 }
 
-func (q *Queries) GetUserByID(ctx context.Context, arg GetUserByIDParams) (User, error) {
+type GetUserByIDRow struct {
+	ID            uuid.UUID
+	Username      string
+	Email         string
+	PasswordHash  string
+	CreatedAt     time.Time
+	CondominiumID uuid.UUID
+	Roles         []string
+}
+
+func (q *Queries) GetUserByID(ctx context.Context, arg GetUserByIDParams) (GetUserByIDRow, error) {
 	row := q.db.QueryRow(ctx, getUserByID, arg.CondominiumID, arg.ID)
-	var i User
+	var i GetUserByIDRow
 	err := row.Scan(
 		&i.ID,
-		&i.CondominiumID,
 		&i.Username,
 		&i.Email,
 		&i.PasswordHash,
-		&i.Roles,
 		&i.CreatedAt,
+		&i.CondominiumID,
+		&i.Roles,
 	)
 	return i, err
 }
 
-const insertUser = `-- name: InsertUser :one
-
-INSERT INTO users (condominium_id, username, email, password_hash, roles)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id
+const insertMembership = `-- name: InsertMembership :exec
+INSERT INTO memberships (user_id, condominium_id, roles)
+VALUES ($1, $2, $3)
 `
 
-type InsertUserParams struct {
-	CondominiumID string
-	Username      string
-	Email         string
-	PasswordHash  string
+type InsertMembershipParams struct {
+	UserID        uuid.UUID
+	CondominiumID uuid.UUID
 	Roles         []string
 }
 
+func (q *Queries) InsertMembership(ctx context.Context, arg InsertMembershipParams) error {
+	_, err := q.db.Exec(ctx, insertMembership, arg.UserID, arg.CondominiumID, arg.Roles)
+	return err
+}
+
+const insertUser = `-- name: InsertUser :exec
+
+INSERT INTO users (id, username, email, password_hash)
+VALUES ($1, $2, $3, $4)
+`
+
+type InsertUserParams struct {
+	ID           uuid.UUID
+	Username     string
+	Email        string
+	PasswordHash string
+}
+
+// A conta (users) é global; o papel é do vínculo (memberships) com o condomínio.
 // Todas as consultas recebem condominium_id: nenhuma leitura ou escrita sem tenant.
 // O e-mail chega já normalizado (minúsculo, sem espaços) e é único na base toda.
-func (q *Queries) InsertUser(ctx context.Context, arg InsertUserParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, insertUser,
-		arg.CondominiumID,
+// O id é gerado pela API: o RETURNING exigiria ler a linha antes de ela ter vínculo.
+func (q *Queries) InsertUser(ctx context.Context, arg InsertUserParams) error {
+	_, err := q.db.Exec(ctx, insertUser,
+		arg.ID,
 		arg.Username,
 		arg.Email,
 		arg.PasswordHash,
-		arg.Roles,
 	)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
+	return err
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, condominium_id, username, email, password_hash, roles, created_at
-FROM users
-WHERE condominium_id = $1
-ORDER BY created_at, id
+SELECT u.id, u.username, u.email, u.password_hash, u.created_at, m.condominium_id, m.roles
+FROM users u
+JOIN memberships m ON m.user_id = u.id
+WHERE m.condominium_id = $1
+ORDER BY u.created_at, u.id
 LIMIT $3 OFFSET $2
 `
 
 type ListUsersParams struct {
-	CondominiumID string
+	CondominiumID uuid.UUID
 	PageOffset    int32
 	PageLimit     int32
 }
 
-func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error) {
+type ListUsersRow struct {
+	ID            uuid.UUID
+	Username      string
+	Email         string
+	PasswordHash  string
+	CreatedAt     time.Time
+	CondominiumID uuid.UUID
+	Roles         []string
+}
+
+func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error) {
 	rows, err := q.db.Query(ctx, listUsers, arg.CondominiumID, arg.PageOffset, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []User
+	var items []ListUsersRow
 	for rows.Next() {
-		var i User
+		var i ListUsersRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.CondominiumID,
 			&i.Username,
 			&i.Email,
 			&i.PasswordHash,
-			&i.Roles,
 			&i.CreatedAt,
+			&i.CondominiumID,
+			&i.Roles,
 		); err != nil {
 			return nil, err
 		}
@@ -166,19 +158,51 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 	return items, nil
 }
 
+const removeMembership = `-- name: RemoveMembership :one
+SELECT remove_membership($1)::int AS removed
+`
+
+// Remove o vínculo do usuário com o condomínio atual (e a conta, se era o último).
+func (q *Queries) RemoveMembership(ctx context.Context, userID uuid.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, removeMembership, userID)
+	var removed int32
+	err := row.Scan(&removed)
+	return removed, err
+}
+
+const updateMembershipRoles = `-- name: UpdateMembershipRoles :execrows
+UPDATE memberships
+SET roles = $1
+WHERE condominium_id = $2 AND user_id = $3
+`
+
+type UpdateMembershipRolesParams struct {
+	Roles         []string
+	CondominiumID uuid.UUID
+	UserID        uuid.UUID
+}
+
+func (q *Queries) UpdateMembershipRoles(ctx context.Context, arg UpdateMembershipRolesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateMembershipRoles, arg.Roles, arg.CondominiumID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateUser = `-- name: UpdateUser :execrows
-UPDATE users
-SET username = $1, email = $2, password_hash = $3, roles = $4
-WHERE condominium_id = $5 AND id = $6
+UPDATE users u
+SET username = $1, email = $2, password_hash = $3
+WHERE u.id = $4
+  AND EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = u.id AND m.condominium_id = $5)
 `
 
 type UpdateUserParams struct {
 	Username      string
 	Email         string
 	PasswordHash  string
-	Roles         []string
-	CondominiumID string
 	ID            uuid.UUID
+	CondominiumID uuid.UUID
 }
 
 func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (int64, error) {
@@ -186,9 +210,8 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (int64, 
 		arg.Username,
 		arg.Email,
 		arg.PasswordHash,
-		arg.Roles,
-		arg.CondominiumID,
 		arg.ID,
+		arg.CondominiumID,
 	)
 	if err != nil {
 		return 0, err

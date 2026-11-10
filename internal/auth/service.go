@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,6 +25,18 @@ var ErrInvalidCredentials = errors.New("auth: invalid credentials")
 
 // ErrInvalidRefreshToken is returned for an unknown, expired or revoked refresh token.
 var ErrInvalidRefreshToken = errors.New("auth: invalid refresh token")
+
+// ErrRegistrationClosed is returned by sign-up when no default condominium is configured.
+var ErrRegistrationClosed = errors.New("auth: sign-up is not open")
+
+// CondominiumRequiredError is returned by Login when the account belongs to
+// several condominiums and the request did not say which one to sign in to.
+// It is only returned after the password has been checked.
+type CondominiumRequiredError struct {
+	Condominiums []Membership
+}
+
+func (*CondominiumRequiredError) Error() string { return "auth: condominiumId is required" }
 
 // ErrValidation signals an input validation failure.
 var ErrValidation = errors.New("validation error")
@@ -54,6 +67,22 @@ type Service struct {
 	tokens     TokenStore
 	jwtSvc     *pkgjwt.Service
 	refreshTTL time.Duration
+	mfa        *MFA               // nil = no second factor (tests, tools)
+	revoked    revocations        // nil = access tokens are not revocable
+	sessions   SessionRevoker     // nil = only the family of the logout is revoked
+	verified   bool               // require a confirmed e-mail to sign in
+	notify     VerificationSender // e-mails the verification link after sign-up
+}
+
+// VerificationSender e-mails a freshly created account its verification link.
+type VerificationSender interface {
+	SendVerification(ctx context.Context, userID, email, username string)
+}
+
+// WithVerificationMail makes sign-up send the verification link.
+func (s *Service) WithVerificationMail(n VerificationSender) *Service {
+	s.notify = n
+	return s
 }
 
 // NewService creates an auth Service. refreshTTL <= 0 means DefaultRefreshTTL.
@@ -64,10 +93,13 @@ func NewService(repo Repository, tokens TokenStore, jwtSvc *pkgjwt.Service, refr
 	return &Service{repo: repo, tokens: tokens, jwtSvc: jwtSvc, refreshTTL: refreshTTL}
 }
 
-// Register creates a resident account (ROLE_USER) after validating the
-// request and hashing the password. Whatever the client sends, sign-up never
-// grants another role.
+// Register creates a resident account (morador) in the default condominium
+// after validating the request and hashing the password. Whatever the client
+// sends, sign-up never grants another role.
 func (s *Service) Register(ctx context.Context, req RegisterRequest) error {
+	if _, err := tenant.CondominiumID(ctx); err != nil {
+		return ErrRegistrationClosed
+	}
 	email, err := pkgemail.Normalize(req.Email)
 	if err != nil {
 		return fmt.Errorf("%w: a valid email is required", ErrValidation)
@@ -88,13 +120,28 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) error {
 		Username: req.Username,
 		Email:    email,
 		Password: hashed,
-		Roles:    []string{authz.RoleUser},
+		Roles:    []string{authz.RoleMorador},
 	}
-	return s.repo.Save(ctx, user)
+	if err = s.repo.Save(ctx, user); err != nil {
+		return err
+	}
+	if s.notify != nil {
+		s.notify.SendVerification(ctx, user.ID, user.Email, user.Username)
+	}
+	return nil
 }
 
-// Login validates credentials and opens a session (access + refresh token).
-func (s *Service) Login(ctx context.Context, req LoginRequest) (*Tokens, error) {
+// RequireVerifiedEmail makes Login refuse accounts whose e-mail was never confirmed.
+func (s *Service) RequireVerifiedEmail() *Service {
+	s.verified = true
+	return s
+}
+
+// Login validates credentials and, when nothing else is asked, opens a
+// session (access + refresh token) in one condominium: the requested one, or
+// the only one of the account. When the account has a second factor, or its
+// role requires one, the result is a Challenge instead of tokens.
+func (s *Service) Login(ctx context.Context, req LoginRequest) (*LoginResult, error) {
 	if req.Email == "" {
 		return nil, fmt.Errorf("%w: email is required", ErrValidation)
 	}
@@ -122,7 +169,53 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*Tokens, error) 
 		return nil, ErrInvalidCredentials
 	}
 
-	return s.issue(ctx, user, uuid.NewString())
+	if s.verified && !user.EmailVerified {
+		return nil, ErrEmailNotVerified
+	}
+
+	member, err := s.membershipFor(ctx, user.ID, req.CondominiumID)
+	if err != nil {
+		return nil, err
+	}
+	user.Roles, user.CondominiumID = member.Roles, member.CondominiumID
+	ctx = tenant.WithUserID(tenant.WithCondominiumID(ctx, member.CondominiumID), user.ID)
+
+	ch, err := s.challenge(ctx, user, member.Roles)
+	if err != nil {
+		return nil, err
+	}
+	if ch != nil {
+		return &LoginResult{Challenge: ch}, nil
+	}
+	t, err := s.issue(ctx, user, uuid.NewString())
+	if err != nil {
+		return nil, err
+	}
+	return &LoginResult{Tokens: t}, nil
+}
+
+// membershipFor picks the condominium of a login. A condominium the account
+// does not belong to looks like a wrong password.
+func (s *Service) membershipFor(ctx context.Context, userID, wanted string) (Membership, error) {
+	all, err := s.repo.Memberships(ctx, userID)
+	if err != nil {
+		return Membership{}, err
+	}
+	if wanted != "" {
+		for _, m := range all {
+			if strings.EqualFold(m.CondominiumID, wanted) {
+				return m, nil
+			}
+		}
+		return Membership{}, ErrInvalidCredentials
+	}
+	switch len(all) {
+	case 0:
+		return Membership{}, ErrInvalidCredentials
+	case 1:
+		return all[0], nil
+	}
+	return Membership{}, &CondominiumRequiredError{Condominiums: all}
 }
 
 // Refresh exchanges a valid refresh token for a new pair (rotation). The old
@@ -133,6 +226,10 @@ func (s *Service) Refresh(ctx context.Context, raw string) (*Tokens, error) {
 		return nil, ErrInvalidRefreshToken
 	}
 	hash := hashToken(raw)
+	ctx, err := s.tokenTenant(ctx, hash)
+	if err != nil {
+		return nil, err
+	}
 	sess, err := s.tokens.Consume(ctx, hash)
 	if errors.Is(err, ErrTokenNotFound) {
 		if family, ferr := s.tokens.Family(ctx, hash); ferr == nil {
@@ -156,13 +253,29 @@ func (s *Service) Refresh(ctx context.Context, raw string) (*Tokens, error) {
 	return s.issue(ctx, user, sess.FamilyID)
 }
 
-// Logout revokes the session the refresh token belongs to. Unknown tokens
-// are ignored: logging out is always successful for the caller.
-func (s *Service) Logout(ctx context.Context, raw string) error {
+// Logout revokes the session the refresh token belongs to and, when it is
+// given and valid, the access token too. Unknown tokens are ignored: logging
+// out is always successful for the caller.
+func (s *Service) Logout(ctx context.Context, raw, accessToken string) error {
+	if accessToken != "" && s.revoked != nil {
+		if c, err := s.jwtSvc.ValidateToken(accessToken); err == nil && c.ExpiresAt != nil {
+			if err := s.revoked.Revoke(ctx, c.ID, c.ExpiresAt.Time); err != nil {
+				return err
+			}
+		}
+	}
 	if raw == "" {
 		return nil
 	}
-	family, err := s.tokens.Family(ctx, hashToken(raw))
+	hash := hashToken(raw)
+	ctx, err := s.tokenTenant(ctx, hash)
+	if errors.Is(err, ErrInvalidRefreshToken) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	family, err := s.tokens.Family(ctx, hash)
 	if errors.Is(err, ErrTokenNotFound) {
 		return nil
 	}
@@ -170,6 +283,19 @@ func (s *Service) Logout(ctx context.Context, raw string) error {
 		return err
 	}
 	return s.tokens.RevokeFamily(ctx, family)
+}
+
+// tokenTenant puts the condominium that issued the refresh token in ctx: the
+// refresh and logout requests carry no other hint of it.
+func (s *Service) tokenTenant(ctx context.Context, hash []byte) (context.Context, error) {
+	condo, err := s.tokens.CondominiumOf(ctx, hash)
+	if errors.Is(err, ErrTokenNotFound) {
+		return ctx, ErrInvalidRefreshToken
+	}
+	if err != nil {
+		return ctx, err
+	}
+	return tenant.WithCondominiumID(ctx, condo), nil
 }
 
 func (s *Service) issue(ctx context.Context, user *User, familyID string) (*Tokens, error) {

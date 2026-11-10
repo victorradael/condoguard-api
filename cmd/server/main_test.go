@@ -94,7 +94,7 @@ func TestMetricsEndpoint_Security_RequiresMetricsToken(t *testing.T) {
 	for name, bearer := range map[string]string{
 		"anonymous":   "",
 		"wrong token": "not-the-metrics-token",
-		"user JWT":    tokenWithRole(t, authz.RoleAdmin),
+		"user JWT":    tokenWithRole(t, authz.RoleSindico),
 	} {
 		if rec := get(t, h, "/metrics", bearer); rec.Code != http.StatusUnauthorized {
 			t.Errorf("%s: expected 401 from /metrics, got %d", name, rec.Code)
@@ -118,19 +118,19 @@ func TestMetricsEndpoint_DisabledWithoutToken(t *testing.T) {
 
 func TestDocsEndpoints_Security_AdminOnly(t *testing.T) {
 	h := newTestRouter(t)
-	user := tokenWithRole(t, authz.RoleUser)
+	user := tokenWithRole(t, authz.RoleMorador)
 	for _, path := range []string{"/openapi.json", "/docs"} {
 		if rec := get(t, h, path, ""); rec.Code != http.StatusUnauthorized {
 			t.Errorf("anonymous %s: expected 401, got %d", path, rec.Code)
 		}
 		if rec := get(t, h, path, user); rec.Code != http.StatusForbidden {
-			t.Errorf("ROLE_USER %s: expected 403, got %d", path, rec.Code)
+			t.Errorf("morador %s: expected 403, got %d", path, rec.Code)
 		}
 	}
 }
 
 func TestOpenAPIEndpoint_Admin_Returns200WithSpec(t *testing.T) {
-	rec := get(t, newTestRouter(t), "/openapi.json", tokenWithRole(t, authz.RoleAdmin))
+	rec := get(t, newTestRouter(t), "/openapi.json", tokenWithRole(t, authz.RoleSindico))
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200 from /openapi.json, got %d", rec.Code)
@@ -141,7 +141,7 @@ func TestOpenAPIEndpoint_Admin_Returns200WithSpec(t *testing.T) {
 }
 
 func TestDocsEndpoint_Admin_Returns200WithHTML(t *testing.T) {
-	rec := get(t, newTestRouter(t), "/docs", tokenWithRole(t, authz.RoleAdmin))
+	rec := get(t, newTestRouter(t), "/docs", tokenWithRole(t, authz.RoleSindico))
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200 from /docs, got %d", rec.Code)
