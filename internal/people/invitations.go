@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -41,7 +40,6 @@ type invitations struct {
 	mail     mailer.Sender
 	baseURL  string
 	verifier Verifier
-	wg       sync.WaitGroup
 }
 
 // WithInvitations enables invitations: mail sends them, baseURL is where the web

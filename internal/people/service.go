@@ -333,13 +333,6 @@ func deref(s *string) string {
 	return *s
 }
 
-func ptrIfSet(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
 func unitRef(id, unitID uuid.UUID, number string, block *string, kind string, starts time.Time, ends *time.Time) UnitRef {
 	today := civil.Today()
 	u := UnitRef{LinkID: id.String(), UnitID: unitID.String(), UnitNumber: number, BlockName: deref(block), Kind: kind,

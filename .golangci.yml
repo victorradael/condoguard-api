@@ -21,6 +21,8 @@ linters:
         - momento
         - validade
         - autor
+        - dependente
+        - residencial
   exclusions:
     generated: lax
     presets:

@@ -811,7 +811,7 @@ type ListUnitIDsByUserLinksParams struct {
 	UserID        *uuid.UUID
 }
 
-// Unidades em que a conta tem vínculo vigente (qualquer papel): o que o morador enxerga da casa.
+// Unidades em que a conta tem vínculo vigente (exceto dependente): o que o morador enxerga da casa.
 func (q *Queries) ListUnitIDsByUserLinks(ctx context.Context, arg ListUnitIDsByUserLinksParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listUnitIDsByUserLinks, arg.CondominiumID, arg.UserID)
 	if err != nil {
