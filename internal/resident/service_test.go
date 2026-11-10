@@ -77,28 +77,18 @@ func TestResident_Create_MissingUnitNumber_ReturnsValidationError(t *testing.T) 
 	}
 }
 
-func TestResident_Create_MissingCondominiumID_ReturnsValidationError(t *testing.T) {
+func TestResident_Create_CondominiumIDAndOwnerIDAreOptional(t *testing.T) {
 	svc := newService()
 
-	_, err := svc.Create(adminCtx(), resident.CreateRequest{
-		UnitNumber: "101",
-		Floor:      1,
-		OwnerID:    "user-1",
-	})
-
-	if !resident.IsValidationError(err) {
-		t.Errorf("expected validation error, got %v", err)
+	if _, err := svc.Create(adminCtx(), resident.CreateRequest{UnitNumber: "101", Floor: 1}); err != nil {
+		t.Errorf("expected success, got %v", err)
 	}
 }
 
-func TestResident_Create_MissingOwnerID_ReturnsValidationError(t *testing.T) {
+func TestResident_Create_InvalidBlockID_ReturnsValidationError(t *testing.T) {
 	svc := newService()
 
-	_, err := svc.Create(adminCtx(), resident.CreateRequest{
-		UnitNumber:    "101",
-		Floor:         1,
-		CondominiumID: "condo-1",
-	})
+	_, err := svc.Create(adminCtx(), resident.CreateRequest{UnitNumber: "101", BlockID: "not-a-uuid"})
 
 	if !resident.IsValidationError(err) {
 		t.Errorf("expected validation error, got %v", err)
@@ -148,14 +138,14 @@ func TestResident_Create_SameUnitInDifferentCondominium_Succeeds(t *testing.T) {
 	}
 
 	_, err = svc.Create(ctx, resident.CreateRequest{
-		UnitNumber:    "101",
-		Floor:         1,
-		CondominiumID: "condo-2", // different condominium — must succeed
-		OwnerID:       "user-2",
+		UnitNumber: "101",
+		Floor:      1,
+		BlockID:    "6f1f8c3e-0000-4000-8000-000000000002", // another block — must succeed
+		OwnerID:    "user-2",
 	})
 
 	if err != nil {
-		t.Errorf("same unit number in different condominium should succeed, got %v", err)
+		t.Errorf("same unit number in another block should succeed, got %v", err)
 	}
 }
 
@@ -484,10 +474,10 @@ func TestInMemoryRepository_TenantScoped(t *testing.T) {
 	if err := repo.Delete(ctxB, r.ID); !errors.Is(err, resident.ErrNotFound) {
 		t.Errorf("Delete cross-tenant: expected ErrNotFound, got %v", err)
 	}
-	if list, total, _ := repo.FindAll(ctxA, "", page.Default); total != 1 || len(list) != 1 || list[0].ID != r.ID {
+	if list, total, _ := repo.FindAll(ctxA, resident.Filter{}, page.Default); total != 1 || len(list) != 1 || list[0].ID != r.ID {
 		t.Errorf("FindAll condo-a: expected only r, got %v (total %d)", list, total)
 	}
-	if _, _, err := repo.FindAll(context.Background(), "", page.Default); !errors.Is(err, tenant.ErrMissing) {
+	if _, _, err := repo.FindAll(context.Background(), resident.Filter{}, page.Default); !errors.Is(err, tenant.ErrMissing) {
 		t.Errorf("FindAll without tenant: expected ErrMissing, got %v", err)
 	}
 	if _, err := repo.FindByID(context.Background(), r.ID); !errors.Is(err, tenant.ErrMissing) {

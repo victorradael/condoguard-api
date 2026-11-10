@@ -29,6 +29,7 @@ import (
 	"github.com/victorradael/condoguard/api/internal/tenant"
 	"github.com/victorradael/condoguard/api/internal/user"
 	pkgjwt "github.com/victorradael/condoguard/api/pkg/jwt"
+	"github.com/victorradael/condoguard/api/pkg/mailer"
 	"github.com/victorradael/condoguard/api/pkg/openapi"
 )
 
@@ -66,7 +67,15 @@ func newEnv(t *testing.T) *env {
 // server starts the API with condoID as the sign-up/login tenant.
 func (e *env) server(condoID string) *httptest.Server {
 	e.t.Helper()
+	return e.serverWith(condoID, nil)
+}
+
+// serverWith is server with the e-mails going to mail (nil keeps the default).
+func (e *env) serverWith(condoID string, mail mailer.Sender) *httptest.Server {
+	e.t.Helper()
 	cfg := app.Config{
+		Mail:               mail,
+		WebBaseURL:         "https://app.exemplo.test",
 		DatabaseURL:        e.dbURL,
 		MigrateOnStart:     false, // dbtest.NewEnv already migrated
 		CondominiumID:      condoID,

@@ -16,13 +16,14 @@ import (
 type Repository interface {
 	Save(ctx context.Context, r *Resident) error
 	FindByID(ctx context.Context, id string) (*Resident, error)
-	// FindAll returns one page of units; ownerID "" means all of them.
-	FindAll(ctx context.Context, ownerID string, p page.Params) ([]*Resident, int64, error)
-	// IDsByOwner returns the IDs of the units owned by ownerID.
+	// FindAll returns one page of units (see Filter).
+	FindAll(ctx context.Context, f Filter, p page.Params) ([]*Resident, int64, error)
+	// IDsByOwner returns the IDs of the units userID may see: legacy owner or active link.
 	IDsByOwner(ctx context.Context, ownerID string) ([]string, error)
 	Update(ctx context.Context, r *Resident) error
 	Delete(ctx context.Context, id string) error
-	ExistsUnit(ctx context.Context, condominiumID, unitNumber, excludeID string) (bool, error)
+	// ExistsUnit reports whether the number is taken inside the block ("" = no block).
+	ExistsUnit(ctx context.Context, blockID, unitNumber, excludeID string) (bool, error)
 }
 
 // ── In-memory ─────────────────────────────────────────────────────────────────
@@ -53,7 +54,7 @@ func (r *inMemoryRepository) Save(ctx context.Context, res *Resident) error {
 	defer r.mu.Unlock()
 
 	for _, existing := range r.store {
-		if existing.tenant == t && existing.CondominiumID == res.CondominiumID && existing.UnitNumber == res.UnitNumber {
+		if existing.tenant == t && existing.BlockID == res.BlockID && existing.UnitNumber == res.UnitNumber {
 			return ErrDuplicate
 		}
 	}
@@ -88,14 +89,14 @@ func (r *inMemoryRepository) FindByID(ctx context.Context, id string) (*Resident
 	return &cp, nil
 }
 
-func (r *inMemoryRepository) list(ctx context.Context, ownerID string) ([]*memResident, error) {
+func (r *inMemoryRepository) list(ctx context.Context, f Filter) ([]*memResident, error) {
 	t, err := tenant.CondominiumID(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var list []*memResident
 	for _, res := range r.store {
-		if res.tenant == t && (ownerID == "" || res.OwnerID == ownerID) {
+		if res.tenant == t && (f.Viewer == "" || res.OwnerID == f.Viewer) && (f.BlockID == "" || res.BlockID == f.BlockID) {
 			list = append(list, res)
 		}
 	}
@@ -103,11 +104,11 @@ func (r *inMemoryRepository) list(ctx context.Context, ownerID string) ([]*memRe
 	return list, nil
 }
 
-func (r *inMemoryRepository) FindAll(ctx context.Context, ownerID string, p page.Params) ([]*Resident, int64, error) {
+func (r *inMemoryRepository) FindAll(ctx context.Context, f Filter, p page.Params) ([]*Resident, int64, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	all, err := r.list(ctx, ownerID)
+	all, err := r.list(ctx, f)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -124,7 +125,7 @@ func (r *inMemoryRepository) IDsByOwner(ctx context.Context, ownerID string) ([]
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	all, err := r.list(ctx, ownerID)
+	all, err := r.list(ctx, Filter{Viewer: ownerID})
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +159,7 @@ func (r *inMemoryRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (r *inMemoryRepository) ExistsUnit(ctx context.Context, condominiumID, unitNumber, excludeID string) (bool, error) {
+func (r *inMemoryRepository) ExistsUnit(ctx context.Context, blockID, unitNumber, excludeID string) (bool, error) {
 	t, err := tenant.CondominiumID(ctx)
 	if err != nil {
 		return false, err
@@ -170,7 +171,7 @@ func (r *inMemoryRepository) ExistsUnit(ctx context.Context, condominiumID, unit
 		if res.ID == excludeID || res.tenant != t {
 			continue
 		}
-		if res.CondominiumID == condominiumID && res.UnitNumber == unitNumber {
+		if res.BlockID == blockID && res.UnitNumber == unitNumber {
 			return true, nil
 		}
 	}

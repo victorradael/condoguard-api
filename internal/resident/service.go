@@ -3,17 +3,21 @@ package resident
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/victorradael/condoguard/api/internal/audit"
 	"github.com/victorradael/condoguard/api/internal/authz"
+	"github.com/victorradael/condoguard/api/internal/db"
+	"github.com/victorradael/condoguard/api/internal/tenant"
 	"github.com/victorradael/condoguard/api/pkg/page"
 )
 
 // Service holds the business logic for the resident domain.
 //
 // Authorization: admins manage every unit of the condominium; other users
-// only read the units they own (ownerId). A unit the caller may not see is
-// reported as not found, so its existence does not leak.
+// only read the units they have an active link with (owner, tenant, resident;
+// dependents excluded) or are the legacy ownerId of. A unit the caller may not
+// see is reported as not found, so its existence does not leak.
 type Service struct {
 	repo  Repository
 	trail audit.Trail
@@ -40,11 +44,15 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Resident, err
 	if req.UnitNumber == "" {
 		return nil, fmt.Errorf("%w: unitNumber is required", ErrValidation)
 	}
-	if req.CondominiumID == "" {
-		return nil, fmt.Errorf("%w: condominiumId is required", ErrValidation)
+	if len(req.UnitNumber) > maxUnitNumber {
+		return nil, fmt.Errorf("%w: unitNumber is too long", ErrValidation)
 	}
-	if req.OwnerID == "" {
-		return nil, fmt.Errorf("%w: ownerId is required", ErrValidation)
+	if req.BlockID != "" && !validID(req.BlockID) {
+		return nil, fmt.Errorf("%w: blockId is invalid", ErrValidation)
+	}
+	if req.CondominiumID == "" {
+		// The first API versions asked for a free-text condominiumId; now the tenant says it.
+		req.CondominiumID, _ = tenant.CondominiumID(ctx)
 	}
 
 	res := &Resident{
@@ -52,6 +60,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Resident, err
 		Floor:         req.Floor,
 		CondominiumID: req.CondominiumID,
 		OwnerID:       req.OwnerID,
+		BlockID:       req.BlockID,
 	}
 
 	err := s.trail.Atomic(ctx, func(ctx context.Context) (audit.Entry, error) {
@@ -76,14 +85,25 @@ func (s *Service) GetByID(ctx context.Context, id string) (*Resident, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !p.Can(authz.PermUnitsReadAll) && res.OwnerID != p.UserID {
-		return nil, ErrNotFound
+	if !p.Can(authz.PermUnitsReadAll) {
+		mine, merr := s.repo.IDsByOwner(ctx, p.UserID)
+		if merr != nil {
+			return nil, merr
+		}
+		if !slices.Contains(mine, res.ID) {
+			return nil, ErrNotFound
+		}
 	}
 	return res, nil
 }
 
 // List returns one page of the units the caller may see.
 func (s *Service) List(ctx context.Context, pg page.Params) (page.Result[*Resident], error) {
+	return s.ListInBlock(ctx, "", false, pg)
+}
+
+// ListInBlock is List restricted to one block ("" = all), optionally ordered by block and number.
+func (s *Service) ListInBlock(ctx context.Context, blockID string, byNumber bool, pg page.Params) (page.Result[*Resident], error) {
 	p, err := authz.FromContext(ctx)
 	if err != nil {
 		return page.Result[*Resident]{}, err
@@ -92,7 +112,10 @@ func (s *Service) List(ctx context.Context, pg page.Params) (page.Result[*Reside
 	if p.Can(authz.PermUnitsReadAll) {
 		owner = ""
 	}
-	list, total, err := s.repo.FindAll(ctx, owner, pg)
+	if blockID != "" && !validID(blockID) {
+		return page.Result[*Resident]{}, fmt.Errorf("%w: blockId is invalid", ErrValidation)
+	}
+	list, total, err := s.repo.FindAll(ctx, Filter{Viewer: owner, BlockID: blockID, ByNumber: byNumber}, pg)
 	if err != nil {
 		return page.Result[*Resident]{}, err
 	}
@@ -111,16 +134,29 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*Re
 	}
 	before := *res
 
-	// Check uniqueness only when the unit number is actually changing.
-	if req.UnitNumber != "" && req.UnitNumber != res.UnitNumber {
-		exists, xerr := s.repo.ExistsUnit(ctx, res.CondominiumID, req.UnitNumber, id)
+	newBlock, newNumber := res.BlockID, res.UnitNumber
+	if req.BlockID != nil {
+		newBlock = *req.BlockID
+		if newBlock != "" && !validID(newBlock) {
+			return nil, fmt.Errorf("%w: blockId is invalid", ErrValidation)
+		}
+	}
+	if req.UnitNumber != "" {
+		if len(req.UnitNumber) > maxUnitNumber {
+			return nil, fmt.Errorf("%w: unitNumber is too long", ErrValidation)
+		}
+		newNumber = req.UnitNumber
+	}
+	// Check uniqueness only when the place of the unit is actually changing.
+	if newNumber != res.UnitNumber || newBlock != res.BlockID {
+		exists, xerr := s.repo.ExistsUnit(ctx, newBlock, newNumber, id)
 		if xerr != nil {
 			return nil, xerr
 		}
 		if exists {
 			return nil, ErrDuplicate
 		}
-		res.UnitNumber = req.UnitNumber
+		res.UnitNumber, res.BlockID, res.BlockName = newNumber, newBlock, ""
 	}
 
 	if req.Floor != 0 {
@@ -160,3 +196,8 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 func (s *Service) UnitIDsOwnedBy(ctx context.Context, userID string) ([]string, error) {
 	return s.repo.IDsByOwner(ctx, userID)
 }
+
+// maxUnitNumber bounds the free-text unit number ("101", "Cobertura 2", "Loja 3").
+const maxUnitNumber = 40
+
+func validID(id string) bool { _, ok := db.ParseID(id); return ok }

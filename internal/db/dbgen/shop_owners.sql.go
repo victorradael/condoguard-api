@@ -49,7 +49,7 @@ func (q *Queries) DeleteShopOwner(ctx context.Context, arg DeleteShopOwnerParams
 }
 
 const getShopOwnerByID = `-- name: GetShopOwnerByID :one
-SELECT id, shop_name, cnpj, floor, owner_id, created_at, condominium_id
+SELECT id, shop_name, cnpj, floor, owner_id, created_at, condominium_id, is_demo
 FROM shop_owners
 WHERE condominium_id = $1 AND id = $2
 `
@@ -70,6 +70,7 @@ func (q *Queries) GetShopOwnerByID(ctx context.Context, arg GetShopOwnerByIDPara
 		&i.OwnerID,
 		&i.CreatedAt,
 		&i.CondominiumID,
+		&i.IsDemo,
 	)
 	return i, err
 }
@@ -133,7 +134,7 @@ func (q *Queries) ListShopOwnerIDsByOwner(ctx context.Context, arg ListShopOwner
 }
 
 const listShopOwners = `-- name: ListShopOwners :many
-SELECT id, shop_name, cnpj, floor, owner_id, created_at, condominium_id
+SELECT id, shop_name, cnpj, floor, owner_id, created_at, condominium_id, is_demo
 FROM shop_owners
 WHERE condominium_id = $1
   AND ($2::text IS NULL OR owner_id = $2::text)
@@ -171,6 +172,7 @@ func (q *Queries) ListShopOwners(ctx context.Context, arg ListShopOwnersParams) 
 			&i.OwnerID,
 			&i.CreatedAt,
 			&i.CondominiumID,
+			&i.IsDemo,
 		); err != nil {
 			return nil, err
 		}

@@ -178,7 +178,7 @@ func TestResidents_Create_MissingUnitNumber_Returns422(t *testing.T) {
 	}
 }
 
-func TestResidents_Create_MissingCondominiumID_Returns422(t *testing.T) {
+func TestResidents_Create_MissingCondominiumID_DefaultsToTenant(t *testing.T) {
 	router := newTestRouter(t)
 	rec := serve(router, http.MethodPost, "/residents", validToken(t), map[string]any{
 		"unitNumber": "101",
@@ -186,8 +186,8 @@ func TestResidents_Create_MissingCondominiumID_Returns422(t *testing.T) {
 		"ownerId":    "user-1",
 	})
 
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Errorf("expected 422, got %d", rec.Code)
+	if rec.Code != http.StatusCreated {
+		t.Errorf("expected 201 (condominiumId is optional), got %d", rec.Code)
 	}
 }
 
@@ -209,21 +209,20 @@ func TestResidents_Create_DuplicateUnitInCondominium_Returns409(t *testing.T) {
 	}
 }
 
-func TestResidents_Create_SameUnitDifferentCondominium_Returns201(t *testing.T) {
+func TestResidents_Create_SameUnitDifferentBlock_Returns201(t *testing.T) {
 	router := newTestRouter(t)
 	tok := validToken(t)
 
-	createResident(t, router, tok, "101", "condo-1")
+	serve(router, http.MethodPost, "/residents", tok, map[string]any{
+		"unitNumber": "101", "floor": 1, "blockId": "6f1f8c3e-0000-4000-8000-000000000001",
+	})
 
-	rec := serve(router, http.MethodPost, "/residents", tok, map[string]any{
-		"unitNumber":    "101",
-		"floor":         1,
-		"condominiumId": "condo-2",
-		"ownerId":       "user-2",
+	rec := serve(router, http.MethodPost, "/units", tok, map[string]any{
+		"unitNumber": "101", "floor": 1, "blockId": "6f1f8c3e-0000-4000-8000-000000000002",
 	})
 
 	if rec.Code != http.StatusCreated {
-		t.Errorf("expected 201 for same unit in different condominium, got %d", rec.Code)
+		t.Errorf("expected 201 for same unit in another block, got %d", rec.Code)
 	}
 }
 

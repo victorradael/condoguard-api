@@ -65,7 +65,7 @@ func (q *Queries) DeleteExpense(ctx context.Context, arg DeleteExpenseParams) (i
 }
 
 const getExpenseByID = `-- name: GetExpenseByID :one
-SELECT id, description, amount_cents, due_date, resident_id, shop_owner_id, created_at, condominium_id
+SELECT id, description, amount_cents, due_date, resident_id, shop_owner_id, created_at, condominium_id, is_demo
 FROM expenses
 WHERE condominium_id = $1 AND id = $2
 `
@@ -87,6 +87,7 @@ func (q *Queries) GetExpenseByID(ctx context.Context, arg GetExpenseByIDParams) 
 		&i.ShopOwnerID,
 		&i.CreatedAt,
 		&i.CondominiumID,
+		&i.IsDemo,
 	)
 	return i, err
 }
@@ -121,7 +122,7 @@ func (q *Queries) InsertExpense(ctx context.Context, arg InsertExpenseParams) (u
 }
 
 const listExpenses = `-- name: ListExpenses :many
-SELECT id, description, amount_cents, due_date, resident_id, shop_owner_id, created_at, condominium_id
+SELECT id, description, amount_cents, due_date, resident_id, shop_owner_id, created_at, condominium_id, is_demo
 FROM expenses
 WHERE condominium_id = $1
   AND ($2::timestamptz IS NULL OR due_date >= $2::timestamptz)
@@ -173,6 +174,7 @@ func (q *Queries) ListExpenses(ctx context.Context, arg ListExpensesParams) ([]E
 			&i.ShopOwnerID,
 			&i.CreatedAt,
 			&i.CondominiumID,
+			&i.IsDemo,
 		); err != nil {
 			return nil, err
 		}

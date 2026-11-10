@@ -9,17 +9,23 @@ import (
 	"github.com/victorradael/condoguard/api/pkg/page"
 )
 
+// Prefixes are the paths the unit routes are served under.
+var Prefixes = []string{"/residents", "/units"}
+
 // NewHandler wires the resident CRUD routes behind the provided auth middleware.
 // Admins manage all units; other users only read their own (see Service).
 func NewHandler(svc *Service, authMW func(http.Handler) http.Handler) http.Handler {
 	h := &handler{svc: svc}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /residents", h.list)
-	mux.HandleFunc("POST /residents", h.create)
-	mux.HandleFunc("GET /residents/{id}", h.getByID)
-	mux.HandleFunc("PUT /residents/{id}", h.update)
-	mux.HandleFunc("DELETE /residents/{id}", h.delete)
+	// /units is the current name of the resource; /residents stays as an alias.
+	for _, base := range Prefixes {
+		mux.HandleFunc("GET "+base, h.list)
+		mux.HandleFunc("POST "+base, h.create)
+		mux.HandleFunc("GET "+base+"/{id}", h.getByID)
+		mux.HandleFunc("PUT "+base+"/{id}", h.update)
+		mux.HandleFunc("DELETE "+base+"/{id}", h.delete)
+	}
 
 	return authMW(mux)
 }
@@ -34,8 +40,12 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	list, err := h.svc.List(r.Context(), p)
+	list, err := h.svc.ListInBlock(r.Context(), r.URL.Query().Get("blockId"), r.URL.Query().Get("sort") == "number", p)
 	if err != nil {
+		if errors.Is(err, ErrValidation) {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
 		writeServiceError(w, err)
 		return
 	}
@@ -55,7 +65,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, ErrValidation):
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 		case errors.Is(err, ErrDuplicate):
-			writeError(w, http.StatusConflict, "unit number already exists in this condominium")
+			writeError(w, http.StatusConflict, "unit number already exists in this block")
 		default:
 			writeServiceError(w, err)
 		}
@@ -92,7 +102,7 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, ErrNotFound):
 			writeError(w, http.StatusNotFound, "resident not found")
 		case errors.Is(err, ErrDuplicate):
-			writeError(w, http.StatusConflict, "unit number already exists in this condominium")
+			writeError(w, http.StatusConflict, "unit number already exists in this block")
 		case errors.Is(err, ErrValidation):
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 		default:

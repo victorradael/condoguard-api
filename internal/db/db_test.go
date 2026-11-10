@@ -9,7 +9,8 @@ import (
 )
 
 var tables = []string{"users", "residents", "shop_owners", "expenses", "notifications", "refresh_tokens", "notification_reads",
-	"administrators", "condominiums", "memberships", "audit_log", "account_tokens", "recovery_codes"}
+	"administrators", "condominiums", "memberships", "audit_log", "account_tokens", "recovery_codes",
+	"blocks", "people", "unit_links", "invitations"}
 
 // Tables that are not rows of one condominium: the accounts (global identity,
 // visible through the membership), the condominiums themselves and their
