@@ -254,7 +254,7 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger, metrics *middlewa
 		}
 		a.pool = pool
 		if cfg.MigrateOnStart {
-			if err := migrateOnStart(ctx, pool, cfg.MigrationsURL); err != nil {
+			if err = migrateOnStart(ctx, pool, cfg.MigrationsURL); err != nil {
 				a.Close()
 				return nil, err
 			}
@@ -274,7 +274,7 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger, metrics *middlewa
 			return nil, errors.New("REDIS_URL: invalid URL")
 		}
 		a.redis = redis.NewClient(opts)
-		if err := a.redis.Ping(ctx).Err(); err != nil {
+		if err = a.redis.Ping(ctx).Err(); err != nil {
 			a.Close()
 			return nil, fmt.Errorf("redis ping: %w", err)
 		}

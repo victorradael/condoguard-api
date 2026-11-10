@@ -156,12 +156,12 @@ func TestMigration00003_KeepsTheDataOf1a(t *testing.T) {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
-	if err := db.MigrateUp(ctx, pool); err != nil {
+	if err = db.MigrateUp(ctx, pool); err != nil {
 		t.Fatalf("up to 1b with data: %v", err)
 	}
 
 	var n int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM condominiums WHERE name IN ('default', 'outro')`).Scan(&n); err != nil || n != 2 {
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM condominiums WHERE name IN ('default', 'outro')`).Scan(&n); err != nil || n != 2 {
 		t.Fatalf("condominiums created from the old tenant values: %d (%v)", n, err)
 	}
 	rows := map[string]string{}
