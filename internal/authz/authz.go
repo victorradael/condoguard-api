@@ -47,16 +47,26 @@ const (
 	PermNotificationsWrite   Permission = "notifications.write"
 	PermNotificationsReadAll Permission = "notifications.read_all"
 	PermAuditRead            Permission = "audit.read"
+	// People (owners, tenants, residents): what each role sees of a person.
+	// read_all: names and units (porteiro and up); read_contact: + e-mail, phone,
+	// masked CPF and the full history of a unit; read_cpf: + the whole CPF.
+	PermPeopleWrite       Permission = "people.write"
+	PermPeopleReadAll     Permission = "people.read_all"
+	PermPeopleReadContact Permission = "people.read_contact"
+	PermPeopleReadCPF     Permission = "people.read_cpf"
 )
 
 // Matrix says which permissions each role holds. Anything not listed is denied.
 var Matrix = map[string][]Permission{
 	RoleAdministradora: {PermCondominiumManage, PermUsersManage, PermUsersRead, PermUnitsWrite, PermUnitsReadAll,
-		PermExpensesWrite, PermExpensesReadAll, PermNotificationsWrite, PermNotificationsReadAll, PermAuditRead},
+		PermExpensesWrite, PermExpensesReadAll, PermNotificationsWrite, PermNotificationsReadAll, PermAuditRead,
+		PermPeopleWrite, PermPeopleReadAll, PermPeopleReadContact, PermPeopleReadCPF},
 	RoleSindico: {PermUsersManage, PermUsersRead, PermUnitsWrite, PermUnitsReadAll,
-		PermExpensesWrite, PermExpensesReadAll, PermNotificationsWrite, PermNotificationsReadAll, PermAuditRead},
-	RoleConselho: {PermUsersRead, PermUnitsReadAll, PermExpensesReadAll, PermNotificationsReadAll, PermAuditRead},
-	RolePorteiro: {PermUnitsReadAll},
+		PermExpensesWrite, PermExpensesReadAll, PermNotificationsWrite, PermNotificationsReadAll, PermAuditRead,
+		PermPeopleWrite, PermPeopleReadAll, PermPeopleReadContact, PermPeopleReadCPF},
+	RoleConselho: {PermUsersRead, PermUnitsReadAll, PermExpensesReadAll, PermNotificationsReadAll, PermAuditRead,
+		PermPeopleReadAll, PermPeopleReadContact},
+	RolePorteiro: {PermUnitsReadAll, PermPeopleReadAll},
 	RoleMorador:  {},
 }
 

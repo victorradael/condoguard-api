@@ -135,7 +135,7 @@ func NewEnv(t testing.TB) *Env {
 		"REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM " + role,
 		"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO " + role,
 		"GRANT EXECUTE ON FUNCTION auth_user_by_email(text), auth_memberships(uuid), auth_refresh_condominium(bytea), condominium_lookup(text), remove_membership(uuid), " +
-			"account_token_issue(uuid, text, bytea, timestamptz), account_token_issue_for_member(uuid, text, bytea, timestamptz, uuid), account_token_peek(bytea, text), account_verify_email(bytea), account_reset_password(bytea, text), revoke_user_sessions(uuid) TO " + role,
+			"account_token_issue(uuid, text, bytea, timestamptz), account_token_issue_for_member(uuid, text, bytea, timestamptz, uuid), account_token_peek(bytea, text), account_verify_email(bytea), account_reset_password(bytea, text), revoke_user_sessions(uuid), invitation_peek(bytea) TO " + role,
 	} {
 		if _, err = admin.Exec(ctx, q); err != nil {
 			t.Fatalf("dbtest: %s: %v", q, err)

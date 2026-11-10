@@ -25,6 +25,7 @@ type Administrator struct {
 	ID        uuid.UUID
 	Name      string
 	CreatedAt time.Time
+	IsDemo    bool
 }
 
 type AuditLog struct {
@@ -41,6 +42,15 @@ type AuditLog struct {
 	RequestID     string
 	Before        []byte
 	After         []byte
+	IsDemo        bool
+}
+
+type Block struct {
+	ID            uuid.UUID
+	CondominiumID uuid.UUID
+	Name          string
+	IsDemo        bool
+	CreatedAt     time.Time
 }
 
 type CondoMap struct {
@@ -53,6 +63,7 @@ type Condominium struct {
 	AdministratorID *uuid.UUID
 	Name            string
 	CreatedAt       time.Time
+	IsDemo          bool
 }
 
 type Expense struct {
@@ -64,6 +75,22 @@ type Expense struct {
 	ShopOwnerID   string
 	CreatedAt     time.Time
 	CondominiumID uuid.UUID
+	IsDemo        bool
+}
+
+type Invitation struct {
+	ID            uuid.UUID
+	CondominiumID uuid.UUID
+	PersonID      uuid.UUID
+	Email         string
+	TokenHash     []byte
+	Channel       string
+	CreatedBy     *uuid.UUID
+	CreatedAt     time.Time
+	ExpiresAt     time.Time
+	AcceptedAt    *time.Time
+	RevokedAt     *time.Time
+	IsDemo        bool
 }
 
 type Membership struct {
@@ -71,6 +98,7 @@ type Membership struct {
 	CondominiumID uuid.UUID
 	Roles         []string
 	CreatedAt     time.Time
+	IsDemo        bool
 }
 
 type Notification struct {
@@ -81,6 +109,7 @@ type Notification struct {
 	ResidentIds   []string
 	ShopOwnerIds  []string
 	CondominiumID uuid.UUID
+	IsDemo        bool
 }
 
 type NotificationRead struct {
@@ -88,6 +117,19 @@ type NotificationRead struct {
 	UserID         uuid.UUID
 	ReadAt         time.Time
 	CondominiumID  uuid.UUID
+}
+
+type Person struct {
+	ID            uuid.UUID
+	CondominiumID uuid.UUID
+	FullName      string
+	Cpf           *string
+	Email         *string
+	Phone         *string
+	UserID        *uuid.UUID
+	IsDemo        bool
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type RecoveryCode struct {
@@ -117,6 +159,8 @@ type Resident struct {
 	OwnerID        string
 	CreatedAt      time.Time
 	CondominiumID  uuid.UUID
+	IsDemo         bool
+	BlockID        *uuid.UUID
 }
 
 type ShopOwner struct {
@@ -127,6 +171,19 @@ type ShopOwner struct {
 	OwnerID       string
 	CreatedAt     time.Time
 	CondominiumID uuid.UUID
+	IsDemo        bool
+}
+
+type UnitLink struct {
+	ID            uuid.UUID
+	CondominiumID uuid.UUID
+	UnitID        uuid.UUID
+	PersonID      uuid.UUID
+	Kind          string
+	StartsOn      time.Time
+	EndsOn        *time.Time
+	IsDemo        bool
+	CreatedAt     time.Time
 }
 
 type User struct {
@@ -139,4 +196,5 @@ type User struct {
 	TotpSecret      []byte
 	TotpEnabledAt   *time.Time
 	TotpLastStep    int64
+	IsDemo          bool
 }

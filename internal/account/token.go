@@ -44,3 +44,6 @@ func wellFormed(token string) bool {
 	_, err := b32.DecodeString(canon)
 	return err == nil
 }
+
+// ValidToken reports whether the input has the shape of a token (see wellFormed).
+func ValidToken(token string) bool { return wellFormed(token) }

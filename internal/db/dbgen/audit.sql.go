@@ -69,7 +69,7 @@ func (q *Queries) InsertAudit(ctx context.Context, arg InsertAuditParams) error 
 }
 
 const listAudit = `-- name: ListAudit :many
-SELECT id, condominium_id, occurred_at, actor_user_id, actor_roles, action, resource, resource_id, ip, user_agent, request_id, before, after
+SELECT id, condominium_id, occurred_at, actor_user_id, actor_roles, action, resource, resource_id, ip, user_agent, request_id, before, after, is_demo
 FROM audit_log
 WHERE condominium_id = $1
   AND ($2::text IS NULL OR resource = $2::text)
@@ -115,6 +115,7 @@ func (q *Queries) ListAudit(ctx context.Context, arg ListAuditParams) ([]AuditLo
 			&i.RequestID,
 			&i.Before,
 			&i.After,
+			&i.IsDemo,
 		); err != nil {
 			return nil, err
 		}

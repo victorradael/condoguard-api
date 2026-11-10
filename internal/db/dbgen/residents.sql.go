@@ -13,18 +13,24 @@ import (
 
 const countResidents = `-- name: CountResidents :one
 SELECT count(*)
-FROM residents
-WHERE condominium_id = $1
-  AND ($2::text IS NULL OR owner_id = $2::text)
+FROM residents r
+WHERE r.condominium_id = $1
+  AND ($2::text IS NULL
+       OR r.owner_id = $2::text
+       OR EXISTS (SELECT 1 FROM unit_links l JOIN people p ON p.condominium_id = l.condominium_id AND p.id = l.person_id
+                  WHERE l.condominium_id = r.condominium_id AND l.unit_id = r.id AND p.user_id::text = $2::text
+                    AND l.kind <> 'dependente' AND l.starts_on <= civil_today() AND (l.ends_on IS NULL OR l.ends_on > civil_today())))
+  AND ($3::uuid IS NULL OR r.block_id = $3::uuid)
 `
 
 type CountResidentsParams struct {
 	CondominiumID uuid.UUID
-	OwnerID       *string
+	Viewer        *string
+	BlockID       *uuid.UUID
 }
 
 func (q *Queries) CountResidents(ctx context.Context, arg CountResidentsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countResidents, arg.CondominiumID, arg.OwnerID)
+	row := q.db.QueryRow(ctx, countResidents, arg.CondominiumID, arg.Viewer, arg.BlockID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -48,10 +54,31 @@ func (q *Queries) DeleteResident(ctx context.Context, arg DeleteResidentParams) 
 	return result.RowsAffected(), nil
 }
 
+const findResidentByNumber = `-- name: FindResidentByNumber :one
+SELECT id FROM residents
+WHERE condominium_id = $1
+  AND block_id IS NOT DISTINCT FROM $2::uuid
+  AND unit_number = $3
+`
+
+type FindResidentByNumberParams struct {
+	CondominiumID uuid.UUID
+	BlockID       *uuid.UUID
+	UnitNumber    string
+}
+
+func (q *Queries) FindResidentByNumber(ctx context.Context, arg FindResidentByNumberParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, findResidentByNumber, arg.CondominiumID, arg.BlockID, arg.UnitNumber)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getResidentByID = `-- name: GetResidentByID :one
-SELECT id, condominium_ref, unit_number, floor, owner_id, created_at, condominium_id
-FROM residents
-WHERE condominium_id = $1 AND id = $2
+SELECT r.id, r.condominium_ref, r.unit_number, r.floor, r.owner_id, r.block_id, b.name AS block_name
+FROM residents r
+LEFT JOIN blocks b ON b.condominium_id = r.condominium_id AND b.id = r.block_id
+WHERE r.condominium_id = $1 AND r.id = $2
 `
 
 type GetResidentByIDParams struct {
@@ -59,61 +86,85 @@ type GetResidentByIDParams struct {
 	ID            uuid.UUID
 }
 
-func (q *Queries) GetResidentByID(ctx context.Context, arg GetResidentByIDParams) (Resident, error) {
+type GetResidentByIDRow struct {
+	ID             uuid.UUID
+	CondominiumRef string
+	UnitNumber     string
+	Floor          int32
+	OwnerID        string
+	BlockID        *uuid.UUID
+	BlockName      *string
+}
+
+func (q *Queries) GetResidentByID(ctx context.Context, arg GetResidentByIDParams) (GetResidentByIDRow, error) {
 	row := q.db.QueryRow(ctx, getResidentByID, arg.CondominiumID, arg.ID)
-	var i Resident
+	var i GetResidentByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.CondominiumRef,
 		&i.UnitNumber,
 		&i.Floor,
 		&i.OwnerID,
-		&i.CreatedAt,
-		&i.CondominiumID,
+		&i.BlockID,
+		&i.BlockName,
 	)
 	return i, err
 }
 
 const insertResident = `-- name: InsertResident :one
-INSERT INTO residents (condominium_id, condominium_ref, unit_number, floor, owner_id)
-VALUES ($1, $2, $3, $4, $5)
+
+INSERT INTO residents (id, condominium_id, condominium_ref, unit_number, floor, owner_id, block_id, is_demo)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING id
 `
 
 type InsertResidentParams struct {
+	ID             uuid.UUID
 	CondominiumID  uuid.UUID
 	CondominiumRef string
 	UnitNumber     string
 	Floor          int32
 	OwnerID        string
+	BlockID        *uuid.UUID
+	IsDemo         bool
 }
 
+// A unidade (tabela residents) e o seu bloco. Quem não vê tudo (viewer) enxerga as
+// unidades em que consta como responsável antigo (owner_id) ou tem vínculo vigente que
+// dá acesso aos dados da unidade (todos menos dependente).
 func (q *Queries) InsertResident(ctx context.Context, arg InsertResidentParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, insertResident,
+		arg.ID,
 		arg.CondominiumID,
 		arg.CondominiumRef,
 		arg.UnitNumber,
 		arg.Floor,
 		arg.OwnerID,
+		arg.BlockID,
+		arg.IsDemo,
 	)
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
 }
 
-const listResidentIDsByOwner = `-- name: ListResidentIDsByOwner :many
-SELECT id
-FROM residents
-WHERE condominium_id = $1 AND owner_id = $2
+const listResidentIDsByViewer = `-- name: ListResidentIDsByViewer :many
+SELECT r.id
+FROM residents r
+WHERE r.condominium_id = $1
+  AND (r.owner_id = $2::text
+       OR EXISTS (SELECT 1 FROM unit_links l JOIN people p ON p.condominium_id = l.condominium_id AND p.id = l.person_id
+                  WHERE l.condominium_id = r.condominium_id AND l.unit_id = r.id AND p.user_id::text = $2::text
+                    AND l.kind <> 'dependente' AND l.starts_on <= civil_today() AND (l.ends_on IS NULL OR l.ends_on > civil_today())))
 `
 
-type ListResidentIDsByOwnerParams struct {
+type ListResidentIDsByViewerParams struct {
 	CondominiumID uuid.UUID
-	OwnerID       string
+	Viewer        string
 }
 
-func (q *Queries) ListResidentIDsByOwner(ctx context.Context, arg ListResidentIDsByOwnerParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listResidentIDsByOwner, arg.CondominiumID, arg.OwnerID)
+func (q *Queries) ListResidentIDsByViewer(ctx context.Context, arg ListResidentIDsByViewerParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listResidentIDsByViewer, arg.CondominiumID, arg.Viewer)
 	if err != nil {
 		return nil, err
 	}
@@ -133,26 +184,49 @@ func (q *Queries) ListResidentIDsByOwner(ctx context.Context, arg ListResidentID
 }
 
 const listResidents = `-- name: ListResidents :many
-SELECT id, condominium_ref, unit_number, floor, owner_id, created_at, condominium_id
-FROM residents
-WHERE condominium_id = $1
-  AND ($2::text IS NULL OR owner_id = $2::text)
-ORDER BY created_at, id
-LIMIT $4 OFFSET $3
+SELECT r.id, r.condominium_ref, r.unit_number, r.floor, r.owner_id, r.block_id, b.name AS block_name
+FROM residents r
+LEFT JOIN blocks b ON b.condominium_id = r.condominium_id AND b.id = r.block_id
+WHERE r.condominium_id = $1
+  AND ($2::text IS NULL
+       OR r.owner_id = $2::text
+       OR EXISTS (SELECT 1 FROM unit_links l JOIN people p ON p.condominium_id = l.condominium_id AND p.id = l.person_id
+                  WHERE l.condominium_id = r.condominium_id AND l.unit_id = r.id AND p.user_id::text = $2::text
+                    AND l.kind <> 'dependente' AND l.starts_on <= civil_today() AND (l.ends_on IS NULL OR l.ends_on > civil_today())))
+  AND ($3::uuid IS NULL OR r.block_id = $3::uuid)
+ORDER BY (CASE WHEN $4::boolean THEN b.name END) NULLS FIRST,
+         (CASE WHEN $4::boolean THEN length(r.unit_number) END),
+         (CASE WHEN $4::boolean THEN r.unit_number END),
+         r.created_at, r.id
+LIMIT $6 OFFSET $5
 `
 
 type ListResidentsParams struct {
 	CondominiumID uuid.UUID
-	OwnerID       *string
+	Viewer        *string
+	BlockID       *uuid.UUID
+	ByNumber      bool
 	PageOffset    int32
 	PageLimit     int32
 }
 
-// owner_id NULL lista todas as unidades do condomínio (administração).
-func (q *Queries) ListResidents(ctx context.Context, arg ListResidentsParams) ([]Resident, error) {
+type ListResidentsRow struct {
+	ID             uuid.UUID
+	CondominiumRef string
+	UnitNumber     string
+	Floor          int32
+	OwnerID        string
+	BlockID        *uuid.UUID
+	BlockName      *string
+}
+
+// viewer NULL lista todas as unidades do condomínio (administração).
+func (q *Queries) ListResidents(ctx context.Context, arg ListResidentsParams) ([]ListResidentsRow, error) {
 	rows, err := q.db.Query(ctx, listResidents,
 		arg.CondominiumID,
-		arg.OwnerID,
+		arg.Viewer,
+		arg.BlockID,
+		arg.ByNumber,
 		arg.PageOffset,
 		arg.PageLimit,
 	)
@@ -160,17 +234,17 @@ func (q *Queries) ListResidents(ctx context.Context, arg ListResidentsParams) ([
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Resident
+	var items []ListResidentsRow
 	for rows.Next() {
-		var i Resident
+		var i ListResidentsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.CondominiumRef,
 			&i.UnitNumber,
 			&i.Floor,
 			&i.OwnerID,
-			&i.CreatedAt,
-			&i.CondominiumID,
+			&i.BlockID,
+			&i.BlockName,
 		); err != nil {
 			return nil, err
 		}
@@ -187,23 +261,23 @@ SELECT EXISTS (
     SELECT 1
     FROM residents
     WHERE condominium_id = $1
-      AND condominium_ref = $2
+      AND block_id IS NOT DISTINCT FROM $2::uuid
       AND unit_number = $3
       AND ($4::uuid IS NULL OR id <> $4::uuid)
 )
 `
 
 type ResidentUnitExistsParams struct {
-	CondominiumID  uuid.UUID
-	CondominiumRef string
-	UnitNumber     string
-	ExcludeID      *uuid.UUID
+	CondominiumID uuid.UUID
+	BlockID       *uuid.UUID
+	UnitNumber    string
+	ExcludeID     *uuid.UUID
 }
 
 func (q *Queries) ResidentUnitExists(ctx context.Context, arg ResidentUnitExistsParams) (bool, error) {
 	row := q.db.QueryRow(ctx, residentUnitExists,
 		arg.CondominiumID,
-		arg.CondominiumRef,
+		arg.BlockID,
 		arg.UnitNumber,
 		arg.ExcludeID,
 	)
@@ -214,8 +288,8 @@ func (q *Queries) ResidentUnitExists(ctx context.Context, arg ResidentUnitExists
 
 const updateResident = `-- name: UpdateResident :execrows
 UPDATE residents
-SET condominium_ref = $1, unit_number = $2, floor = $3, owner_id = $4
-WHERE condominium_id = $5 AND id = $6
+SET condominium_ref = $1, unit_number = $2, floor = $3, owner_id = $4, block_id = $5
+WHERE condominium_id = $6 AND id = $7
 `
 
 type UpdateResidentParams struct {
@@ -223,6 +297,7 @@ type UpdateResidentParams struct {
 	UnitNumber     string
 	Floor          int32
 	OwnerID        string
+	BlockID        *uuid.UUID
 	CondominiumID  uuid.UUID
 	ID             uuid.UUID
 }
@@ -233,6 +308,7 @@ func (q *Queries) UpdateResident(ctx context.Context, arg UpdateResidentParams) 
 		arg.UnitNumber,
 		arg.Floor,
 		arg.OwnerID,
+		arg.BlockID,
 		arg.CondominiumID,
 		arg.ID,
 	)

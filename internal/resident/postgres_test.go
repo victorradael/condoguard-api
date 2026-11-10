@@ -7,6 +7,9 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/victorradael/condoguard/api/internal/db"
+	"github.com/victorradael/condoguard/api/internal/db/dbgen"
 	"github.com/victorradael/condoguard/api/internal/db/dbtest"
 	"github.com/victorradael/condoguard/api/internal/resident"
 	"github.com/victorradael/condoguard/api/internal/tenant"
@@ -19,33 +22,59 @@ func TestPostgresRepository_Resident(t *testing.T) {
 	ctxA := tenant.WithCondominiumID(context.Background(), env.Condo("condo-a"))
 	ctxB := tenant.WithCondominiumID(context.Background(), env.Condo("condo-b"))
 
-	r := &resident.Resident{UnitNumber: "101", Floor: 1, CondominiumID: "bloco-1", OwnerID: "owner-1"}
+	q := db.Queries(env.Pool)
+	block := func(ctx context.Context, name string) string {
+		t.Helper()
+		id := uuid.New()
+		condo, _ := tenant.UUID(ctx)
+		if _, err := q.InsertBlock(ctx, dbgen.InsertBlockParams{ID: id, CondominiumID: condo, Name: name}); err != nil {
+			t.Fatalf("block %s: %v", name, err)
+		}
+		return id.String()
+	}
+	blockA, blockB := block(ctxA, "Bloco A"), block(ctxA, "Bloco B")
+
+	r := &resident.Resident{UnitNumber: "101", Floor: 1, CondominiumID: "bloco-1", OwnerID: "owner-1", BlockID: blockA}
 	if err := repo.Save(ctxA, r); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
-	t.Run("unit number unique per condominiumId", func(t *testing.T) {
-		err := repo.Save(ctxA, &resident.Resident{UnitNumber: "101", CondominiumID: "bloco-1", OwnerID: "o"})
+	t.Run("unit number unique per block", func(t *testing.T) {
+		err := repo.Save(ctxA, &resident.Resident{UnitNumber: "101", BlockID: blockA, OwnerID: "o"})
 		if !errors.Is(err, resident.ErrDuplicate) {
 			t.Errorf("expected ErrDuplicate, got %v", err)
 		}
-		// Same unit number under another condominiumId value is allowed (current API behavior).
-		if err := repo.Save(ctxA, &resident.Resident{UnitNumber: "101", CondominiumID: "bloco-2", OwnerID: "o"}); err != nil {
-			t.Errorf("other condominiumId: %v", err)
+		// The same number in another block is a different unit.
+		if err := repo.Save(ctxA, &resident.Resident{UnitNumber: "101", BlockID: blockB, OwnerID: "o"}); err != nil {
+			t.Errorf("other block: %v", err)
+		}
+		// And a unit without block is yet another place; only one of those per number.
+		if err := repo.Save(ctxA, &resident.Resident{UnitNumber: "101"}); err != nil {
+			t.Errorf("no block: %v", err)
+		}
+		if err := repo.Save(ctxA, &resident.Resident{UnitNumber: "101"}); !errors.Is(err, resident.ErrDuplicate) {
+			t.Errorf("no block twice: expected ErrDuplicate, got %v", err)
+		}
+	})
+
+	t.Run("block of another condominium is refused", func(t *testing.T) {
+		foreign := block(ctxB, "Bloco A")
+		if err := repo.Save(ctxA, &resident.Resident{UnitNumber: "555", BlockID: foreign}); !errors.Is(err, resident.ErrValidation) {
+			t.Errorf("expected ErrValidation, got %v", err)
 		}
 	})
 
 	t.Run("ExistsUnit", func(t *testing.T) {
-		if ok, err := repo.ExistsUnit(ctxA, "bloco-1", "101", ""); err != nil || !ok {
+		if ok, err := repo.ExistsUnit(ctxA, blockA, "101", ""); err != nil || !ok {
 			t.Errorf("expected true, got %v (%v)", ok, err)
 		}
-		if ok, _ := repo.ExistsUnit(ctxA, "bloco-1", "101", r.ID); ok {
+		if ok, _ := repo.ExistsUnit(ctxA, blockA, "101", r.ID); ok {
 			t.Error("excluding itself must return false")
 		}
-		if ok, _ := repo.ExistsUnit(ctxA, "bloco-1", "999", ""); ok {
+		if ok, _ := repo.ExistsUnit(ctxA, blockA, "999", ""); ok {
 			t.Error("unknown unit must return false")
 		}
-		if ok, _ := repo.ExistsUnit(ctxB, "bloco-1", "101", ""); ok {
+		if ok, _ := repo.ExistsUnit(ctxB, blockA, "101", ""); ok {
 			t.Error("another tenant must not see the unit")
 		}
 	})
@@ -55,6 +84,10 @@ func TestPostgresRepository_Resident(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if got.BlockName != "Bloco A" {
+			t.Errorf("block name: %+v", got)
+		}
+		got.BlockName = ""
 		if *got != *r {
 			t.Errorf("expected %+v, got %+v", r, got)
 		}
@@ -67,7 +100,7 @@ func TestPostgresRepository_Resident(t *testing.T) {
 			t.Errorf("update not persisted: %+v", again)
 		}
 		// Updating into an existing unit violates the unique constraint.
-		again.UnitNumber, again.CondominiumID = "101", "bloco-2"
+		again.UnitNumber, again.BlockID = "101", blockB
 		if err := repo.Update(ctxA, again); !errors.Is(err, resident.ErrDuplicate) {
 			t.Errorf("expected ErrDuplicate, got %v", err)
 		}
@@ -84,7 +117,7 @@ func TestPostgresRepository_Resident(t *testing.T) {
 		if _, err := repo.FindByID(ctxB, r.ID); !errors.Is(err, resident.ErrNotFound) {
 			t.Errorf("FindByID: expected ErrNotFound, got %v", err)
 		}
-		if list, total, _ := repo.FindAll(ctxB, "", page.Default); len(list) != 0 || total != 0 {
+		if list, total, _ := repo.FindAll(ctxB, resident.Filter{}, page.Default); len(list) != 0 || total != 0 {
 			t.Errorf("FindAll: expected empty, got %d (total %d)", len(list), total)
 		}
 		if ids, err := repo.IDsByOwner(ctxB, "owner-1"); err != nil || len(ids) != 0 {
@@ -99,7 +132,7 @@ func TestPostgresRepository_Resident(t *testing.T) {
 		if err := repo.Delete(ctxB, r.ID); !errors.Is(err, resident.ErrNotFound) {
 			t.Errorf("Delete: expected ErrNotFound, got %v", err)
 		}
-		if _, _, err := repo.FindAll(context.Background(), "", page.Default); !errors.Is(err, tenant.ErrMissing) {
+		if _, _, err := repo.FindAll(context.Background(), resident.Filter{}, page.Default); !errors.Is(err, tenant.ErrMissing) {
 			t.Errorf("missing tenant: expected ErrMissing, got %v", err)
 		}
 		if _, err := repo.IDsByOwner(context.Background(), "owner-1"); !errors.Is(err, tenant.ErrMissing) {
@@ -110,10 +143,18 @@ func TestPostgresRepository_Resident(t *testing.T) {
 		}
 	})
 
-	t.Run("list ordered by creation", func(t *testing.T) {
-		list, total, err := repo.FindAll(ctxA, "", page.Default)
-		if err != nil || len(list) != 2 || total != 2 || list[0].ID != r.ID {
+	t.Run("list ordered by creation, filtered by block, or sorted by number", func(t *testing.T) {
+		list, total, err := repo.FindAll(ctxA, resident.Filter{}, page.Default)
+		if err != nil || len(list) != 3 || total != 3 || list[0].ID != r.ID {
 			t.Errorf("unexpected list: %v total %d (%v)", list, total, err)
+		}
+		list, total, err = repo.FindAll(ctxA, resident.Filter{BlockID: blockB}, page.Default)
+		if err != nil || len(list) != 1 || total != 1 || list[0].BlockName != "Bloco B" {
+			t.Errorf("block filter: %v total %d (%v)", list, total, err)
+		}
+		list, _, err = repo.FindAll(ctxA, resident.Filter{ByNumber: true}, page.Default)
+		if err != nil || len(list) != 3 || list[0].BlockID != "" || list[1].BlockName != "Bloco A" {
+			t.Errorf("sort by number: %v (%v)", list, err)
 		}
 	})
 
@@ -135,7 +176,7 @@ func TestPostgresRepository_Resident_FindAllOwnerFilterAndPaging(t *testing.T) {
 
 	save := func(ctx context.Context, unit, owner string) string {
 		t.Helper()
-		r := &resident.Resident{UnitNumber: unit, Floor: 1, CondominiumID: "bloco-1", OwnerID: owner}
+		r := &resident.Resident{UnitNumber: unit, Floor: 1, OwnerID: owner}
 		if err := repo.Save(ctx, r); err != nil {
 			t.Fatalf("save %s: %v", unit, err)
 		}
@@ -173,7 +214,7 @@ func TestPostgresRepository_Resident_FindAllOwnerFilterAndPaging(t *testing.T) {
 			{page.Default, all},
 		}
 		for _, c := range cases {
-			list, total, err := repo.FindAll(ctxA, "", c.p)
+			list, total, err := repo.FindAll(ctxA, resident.Filter{}, c.p)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -187,14 +228,14 @@ func TestPostgresRepository_Resident_FindAllOwnerFilterAndPaging(t *testing.T) {
 	})
 
 	t.Run("owner filter, paged", func(t *testing.T) {
-		list, total, err := repo.FindAll(ctxA, "owner-a", page.Params{Page: 1, Size: 2})
+		list, total, err := repo.FindAll(ctxA, resident.Filter{Viewer: "owner-a"}, page.Params{Page: 1, Size: 2})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if total != 3 || !slices.Equal(ids(list), ownedByA[0:2]) {
 			t.Errorf("page 1: expected %v total 3, got %v total %d", ownedByA[0:2], ids(list), total)
 		}
-		list, total, _ = repo.FindAll(ctxA, "owner-a", page.Params{Page: 2, Size: 2})
+		list, total, _ = repo.FindAll(ctxA, resident.Filter{Viewer: "owner-a"}, page.Params{Page: 2, Size: 2})
 		if total != 3 || !slices.Equal(ids(list), ownedByA[2:3]) {
 			t.Errorf("page 2: expected %v total 3, got %v total %d", ownedByA[2:3], ids(list), total)
 		}
@@ -203,7 +244,7 @@ func TestPostgresRepository_Resident_FindAllOwnerFilterAndPaging(t *testing.T) {
 				t.Errorf("owner filter leaked %+v", r)
 			}
 		}
-		if list, total, _ := repo.FindAll(ctxA, "nobody", page.Default); len(list) != 0 || total != 0 {
+		if list, total, _ := repo.FindAll(ctxA, resident.Filter{Viewer: "nobody"}, page.Default); len(list) != 0 || total != 0 {
 			t.Errorf("unknown owner: expected empty, got %v total %d", ids(list), total)
 		}
 	})
@@ -228,7 +269,7 @@ func TestPostgresRepository_Resident_FindAllOwnerFilterAndPaging(t *testing.T) {
 	})
 
 	t.Run("tenant isolation", func(t *testing.T) {
-		list, total, err := repo.FindAll(ctxB, "", page.Default)
+		list, total, err := repo.FindAll(ctxB, resident.Filter{}, page.Default)
 		if err != nil || total != 1 || len(list) != 1 || list[0].ID != foreign {
 			t.Errorf("condo-b: expected only its unit, got %v total %d (%v)", ids(list), total, err)
 		}

@@ -29,6 +29,7 @@ import (
 	"github.com/victorradael/condoguard/api/internal/expense"
 	"github.com/victorradael/condoguard/api/internal/middleware"
 	"github.com/victorradael/condoguard/api/internal/notification"
+	"github.com/victorradael/condoguard/api/internal/people"
 	"github.com/victorradael/condoguard/api/internal/resident"
 	"github.com/victorradael/condoguard/api/internal/shopowner"
 	"github.com/victorradael/condoguard/api/internal/tenant"
@@ -479,8 +480,21 @@ func newHandler(cfg Config, jwtSvc *pkgjwt.Service, pool *pgxpool.Pool, lim limi
 
 	// ── Residents (units) ──────────────────────────────────────────────────────
 	residentHandler := resident.NewHandler(residentSvc, authMW)
-	mux.Handle("/residents", residentHandler)
-	mux.Handle("/residents/", residentHandler)
+	for _, p := range resident.Prefixes {
+		mux.Handle(p, residentHandler)
+		mux.Handle(p+"/", residentHandler)
+	}
+
+	// ── Blocks, people, unit links, invitations and CSV import (PostgreSQL only) ─
+	if pool != nil {
+		peopleSvc := people.NewService(pool).WithAudit(trail).WithInvitations(sec.mail, cfg.WebBaseURL, accountSvc)
+		peopleHandler := people.NewHandler(peopleSvc, authMW)
+		for _, p := range people.Routes {
+			mux.Handle(p, peopleHandler)
+		}
+		mux.Handle("POST /auth/invitations/inspect", middleware.IPLimit(lim.loginIP, "too many requests, try again later")(people.NewInspectHandler(peopleSvc)))
+		mux.Handle("POST /auth/invitations/accept", middleware.IPLimit(lim.recovery, "too many requests, try again later")(people.NewAcceptHandler(peopleSvc)))
+	}
 
 	// ── ShopOwners (/shop-owners; /shopOwners kept as an alias) ───────────────
 	shopHandler := shopowner.NewHandler(shopSvc, authMW)

@@ -18,23 +18,27 @@ var documented = map[string]map[authz.Permission]bool{
 		authz.PermCondominiumManage: true, authz.PermUsersManage: true, authz.PermUsersRead: true,
 		authz.PermUnitsWrite: true, authz.PermUnitsReadAll: true, authz.PermExpensesWrite: true, authz.PermExpensesReadAll: true,
 		authz.PermNotificationsWrite: true, authz.PermNotificationsReadAll: true, authz.PermAuditRead: true,
+		authz.PermPeopleWrite: true, authz.PermPeopleReadAll: true, authz.PermPeopleReadContact: true, authz.PermPeopleReadCPF: true,
 	},
 	authz.RoleSindico: {
 		authz.PermUsersManage: true, authz.PermUsersRead: true,
 		authz.PermUnitsWrite: true, authz.PermUnitsReadAll: true, authz.PermExpensesWrite: true, authz.PermExpensesReadAll: true,
 		authz.PermNotificationsWrite: true, authz.PermNotificationsReadAll: true, authz.PermAuditRead: true,
+		authz.PermPeopleWrite: true, authz.PermPeopleReadAll: true, authz.PermPeopleReadContact: true, authz.PermPeopleReadCPF: true,
 	},
 	authz.RoleConselho: {
 		authz.PermUsersRead: true, authz.PermUnitsReadAll: true, authz.PermExpensesReadAll: true,
 		authz.PermNotificationsReadAll: true, authz.PermAuditRead: true,
+		authz.PermPeopleReadAll: true, authz.PermPeopleReadContact: true,
 	},
-	authz.RolePorteiro: {authz.PermUnitsReadAll: true},
+	authz.RolePorteiro: {authz.PermUnitsReadAll: true, authz.PermPeopleReadAll: true},
 	authz.RoleMorador:  {},
 }
 
 var allPermissions = []authz.Permission{
 	authz.PermCondominiumManage, authz.PermUsersManage, authz.PermUsersRead, authz.PermUnitsWrite, authz.PermUnitsReadAll,
 	authz.PermExpensesWrite, authz.PermExpensesReadAll, authz.PermNotificationsWrite, authz.PermNotificationsReadAll, authz.PermAuditRead,
+	authz.PermPeopleWrite, authz.PermPeopleReadAll, authz.PermPeopleReadContact, authz.PermPeopleReadCPF,
 }
 
 func TestMatrix_MatchesTheDocumentedOne(t *testing.T) {
