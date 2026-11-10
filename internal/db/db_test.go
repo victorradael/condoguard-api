@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/victorradael/condoguard/api/internal/db"
@@ -189,5 +190,128 @@ func TestMigration00003_KeepsTheDataOf1a(t *testing.T) {
 	}
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM expenses e JOIN condominiums c ON c.id = e.condominium_id WHERE c.name = 'default'`).Scan(&n); err != nil || n != 1 {
 		t.Errorf("expense of 'default': %d (%v)", n, err)
+	}
+}
+
+// The free-text condominiumId of the first API versions (which scoped the unit
+// number) becomes a block when migrating to 1c; no unit is lost or merged.
+func TestMigration00005_TurnsTheOldCondominiumIDIntoBlocks(t *testing.T) {
+	ctx := context.Background()
+	pool, err := db.NewPool(ctx, dbtest.NewDatabase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if err = db.MigrateUp(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.MigrateDownTo(ctx, pool, 4); err != nil {
+		t.Fatalf("down to 1b: %v", err)
+	}
+	var condo string
+	if err = pool.QueryRow(ctx, `INSERT INTO condominiums (name) VALUES ('c') RETURNING id::text`).Scan(&condo); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO residents (condominium_id, condominium_ref, unit_number, owner_id) VALUES
+		($1, 'bloco-1', '101', 'x'), ($1, 'bloco-2', '101', 'y'), ($1, $1::text, '102', 'z')`, condo); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.MigrateUp(ctx, pool); err != nil {
+		t.Fatalf("up to 1c with data: %v", err)
+	}
+	rows, err := pool.Query(ctx, `SELECT r.unit_number, coalesce(b.name, '-') FROM residents r LEFT JOIN blocks b ON b.id = r.block_id ORDER BY 1, 2`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for rows.Next() {
+		var n, b string
+		if err = rows.Scan(&n, &b); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, n+"@"+b)
+	}
+	rows.Close()
+	if want := []string{"101@bloco-1", "101@bloco-2", "102@-"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("units after the migration: %v, want %v", got, want)
+	}
+	// And down and up again keeps the schema usable.
+	if err = db.MigrateDownTo(ctx, pool, 4); err != nil {
+		t.Fatalf("down again: %v", err)
+	}
+	if err = db.MigrateUp(ctx, pool); err != nil {
+		t.Fatalf("up again: %v", err)
+	}
+}
+
+// The rules of the unit links live in the database, not only in the API.
+func TestUnitLinks_DatabaseRules(t *testing.T) {
+	ctx := context.Background()
+	pool, err := db.NewPool(ctx, dbtest.NewDatabase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if err = db.MigrateUp(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	var a, b, unitA, unitB, ana, bia, other string
+	scan := func(dst *string, q string, args ...any) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, q, args...).Scan(dst); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	scan(&a, `INSERT INTO condominiums (name) VALUES ('a') RETURNING id::text`)
+	scan(&b, `INSERT INTO condominiums (name) VALUES ('b') RETURNING id::text`)
+	scan(&unitA, `INSERT INTO residents (condominium_id, condominium_ref, unit_number, owner_id) VALUES ($1, 'x', '101', '') RETURNING id::text`, a)
+	scan(&unitB, `INSERT INTO residents (condominium_id, condominium_ref, unit_number, owner_id) VALUES ($1, 'x', '101', '') RETURNING id::text`, b)
+	scan(&ana, `INSERT INTO people (condominium_id, full_name) VALUES ($1, 'Ana') RETURNING id::text`, a)
+	scan(&bia, `INSERT INTO people (condominium_id, full_name) VALUES ($1, 'Bia') RETURNING id::text`, a)
+	scan(&other, `INSERT INTO people (condominium_id, full_name) VALUES ($1, 'Outra') RETURNING id::text`, b)
+
+	link := func(condo, unit, person, kind, from, to string) error {
+		var end any
+		if to != "" {
+			end = to
+		}
+		_, err := pool.Exec(ctx, `INSERT INTO unit_links (condominium_id, unit_id, person_id, kind, starts_on, ends_on) VALUES ($1, $2, $3, $4, $5, $6)`,
+			condo, unit, person, kind, from, end)
+		return err
+	}
+	expect := func(what string, err error, want func(error) bool) {
+		t.Helper()
+		if !want(err) {
+			t.Errorf("%s: got %v", what, err)
+		}
+	}
+	ok := func(err error) bool { return err == nil }
+
+	expect("first owner", link(a, unitA, ana, "proprietario", "2020-01-01", "2022-01-01"), ok)
+	expect("the next owner starts the day the previous one ends", link(a, unitA, bia, "proprietario", "2022-01-01", ""), ok)
+	expect("two principal owners at once", link(a, unitA, ana, "proprietario", "2023-01-01", ""), db.IsExclusionViolation)
+	expect("an owner inside the period of another", link(a, unitA, ana, "proprietario", "2021-06-01", "2021-07-01"), db.IsExclusionViolation)
+	expect("a co-owner next to the principal one", link(a, unitA, ana, "coproprietario", "2022-01-01", ""), ok)
+	expect("the same co-owner twice", link(a, unitA, ana, "coproprietario", "2023-01-01", ""), db.IsExclusionViolation)
+	expect("a link that ends before it starts", link(a, unitA, ana, "morador", "2023-01-01", "2023-01-01"), func(e error) bool { return e != nil })
+	expect("an unknown kind", link(a, unitA, ana, "visitante", "2023-01-01", ""), func(e error) bool { return e != nil })
+	// The unit and the person must belong to the condominium of the link.
+	expect("a unit of another condominium", link(a, unitB, ana, "morador", "2023-01-01", ""), db.IsForeignKeyViolation)
+	expect("a person of another condominium", link(a, unitA, other, "morador", "2023-01-01", ""), db.IsForeignKeyViolation)
+	// A person with links cannot be deleted (history), nor a block with units.
+	if _, err := pool.Exec(ctx, `DELETE FROM people WHERE id = $1`, ana); !db.IsForeignKeyViolation(err) {
+		t.Errorf("deleting a person with links: %v", err)
+	}
+	// Deleting the unit takes its links along; deleting the condominium takes everything.
+	if _, err := pool.Exec(ctx, `DELETE FROM residents WHERE id = $1`, unitA); err != nil {
+		t.Errorf("deleting a unit: %v", err)
+	}
+	var n int
+	scan2 := pool.QueryRow(ctx, `SELECT count(*) FROM unit_links WHERE condominium_id = $1`, a)
+	if err := scan2.Scan(&n); err != nil || n != 0 {
+		t.Errorf("links left after deleting the unit: %d (%v)", n, err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM condominiums WHERE id = $1`, a); err != nil {
+		t.Errorf("deleting a condominium with people: %v", err)
 	}
 }

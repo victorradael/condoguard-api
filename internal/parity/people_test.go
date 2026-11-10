@@ -5,11 +5,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/victorradael/condoguard/api/internal/authz"
+	"github.com/victorradael/condoguard/api/internal/seed"
 	"github.com/victorradael/condoguard/api/pkg/mailer"
 )
 
@@ -559,4 +561,174 @@ func TestPeople_CrossTenantIsolation(t *testing.T) {
 	}
 	// The same CPF may exist in another condominium.
 	adminB.call("POST", "/people", map[string]any{"fullName": "Ana Souza", "cpf": cpfAna}, http.StatusCreated)
+}
+
+// ── the fictitious data of FAB-10 through the API ────────────────────────────
+
+const seedPassword = "Demo-senha-de-teste-2026"
+
+func TestSeedPoC_SpreadsheetImportsWithoutErrors(t *testing.T) {
+	f := newTenant(t) // condominium A: a síndico and two units
+	ds, err := seed.Generate(seed.Profiles["poc"], seed.DefaultSeed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sheet strings.Builder
+	if err = ds.WriteImportCSV(&sheet); err != nil {
+		t.Fatal(err)
+	}
+	// Condominium B is empty: the spreadsheet is the initial import.
+	srvB := f.e.server(condoB)
+	adminB := api{t, srvB, adminToken(t, f.e, srvB, condoB)}
+	postB := func(path, body string, want int) map[string]any {
+		t.Helper()
+		resp := do(t, srvB, req{method: "POST", path: path, token: adminB.token, rawBody: strings.NewReader(body)})
+		expect(t, resp, want, "POST "+path)
+		return decode(t, resp)
+	}
+
+	prev := postB("/imports/preview", sheet.String(), http.StatusOK)
+	if prev["valid"] != true || prev["errorCount"] != float64(0) || prev["newUnits"] != float64(120) || prev["newBlocks"] != float64(3) {
+		t.Fatalf("preview of the PoC spreadsheet: %v", prev)
+	}
+	rep := postB("/imports", sheet.String(), http.StatusCreated)
+	if rep["errorCount"] != float64(0) || rep["newUnits"] != float64(120) {
+		t.Fatalf("import of the PoC spreadsheet: %v", rep)
+	}
+	units := 0
+	for page := 1; ; page++ {
+		got := adminB.call("GET", "/units?pageSize=100&sort=number&page="+strconv.Itoa(page), nil, http.StatusOK)
+		items, _ := got["items"].([]any)
+		units += len(items)
+		if len(items) < 100 {
+			break
+		}
+	}
+	if units != 120 {
+		t.Errorf("units after the import: %d", units)
+	}
+	current := 0
+	for _, l := range ds.Links {
+		if l.Ends == nil {
+			current++
+		}
+	}
+	if rep["newLinks"] != float64(current) {
+		t.Errorf("links: expected %d (the current ones), got %v", current, rep["newLinks"])
+	}
+
+	// The spoiled spreadsheet: a report by line, nothing saved.
+	var broken strings.Builder
+	if err = ds.WriteBrokenCSV(&broken); err != nil {
+		t.Fatal(err)
+	}
+	post := func(path, body string, want int) map[string]any {
+		t.Helper()
+		resp := do(t, f.srv, req{method: "POST", path: path, token: f.sindico.token, rawBody: strings.NewReader(body)})
+		expect(t, resp, want, "POST "+path)
+		return decode(t, resp)
+	}
+	resp := post("/imports/preview", broken.String(), http.StatusOK) // condominium A: the units are new there too
+	if resp["valid"] != false {
+		t.Fatalf("the spoiled spreadsheet must not be valid: %v", resp)
+	}
+	errs, _ := resp["errors"].([]any)
+	if len(errs) < 6 {
+		t.Errorf("expected at least 6 problems reported by line, got %d: %v", len(errs), errs)
+	}
+	for _, e := range errs {
+		m := e.(map[string]any)
+		if m["line"].(float64) < 2 || m["message"] == "" {
+			t.Errorf("report line: %v", m)
+		}
+	}
+	post("/imports", broken.String(), http.StatusUnprocessableEntity)
+	if got := f.sindico.items("/units?pageSize=100"); len(got) != 2 {
+		t.Errorf("a refused import must save nothing, units: %d", len(got))
+	}
+}
+
+func TestSeedPoC_ResidentSeesNothingOfOtherUnits(t *testing.T) {
+	e := newEnv(t)
+	ds, err := seed.Generate(seed.Profiles["poc"], seed.DefaultSeed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = seed.Load(context.Background(), e.db.Pool, ds, seedPassword); err != nil {
+		t.Fatal(err)
+	}
+	srv := e.server(ds.CondominiumID.String())
+	loginAs := func(email string) api {
+		resp := do(t, srv, req{method: "POST", path: "/auth/login", body: map[string]any{"email": email, "password": seedPassword}})
+		expect(t, resp, http.StatusOK, "login "+email)
+		tok, _ := decode(t, resp)["accessToken"].(string)
+		return api{t, srv, tok}
+	}
+	morador, sindico, porteiro := loginAs("morador@exemplo.test"), loginAs("sindico@exemplo.test"), loginAs("porteiro@exemplo.test")
+	inquilino := loginAs("inquilino@exemplo.test")
+
+	// Her household: the people with an active link in her unit.
+	profile := morador.call("GET", "/me/profile", nil, http.StatusOK)
+	selfID := profile["person"].(map[string]any)["id"].(string)
+	mine := morador.call("GET", "/me/units", nil, http.StatusOK)["items"].([]any)
+	if len(mine) != 1 {
+		t.Fatalf("morador@ should live in one unit: %v", mine)
+	}
+	unitID := mine[0].(map[string]any)["unitId"].(string)
+	household := map[string]bool{}
+	for _, l := range sindico.items("/units/" + unitID + "/links?active=true") {
+		household[l["personId"].(string)] = true
+	}
+
+	// Every person of the condominium (300): the resident reaches exactly the household, never the CPF of others.
+	seen := 0
+	for page := 1; ; page++ {
+		got := sindico.call("GET", "/people?pageSize=100&page="+strconv.Itoa(page), nil, http.StatusOK)["items"].([]any)
+		for _, it := range got {
+			pid := it.(map[string]any)["id"].(string)
+			status := morador.status("GET", "/people/"+pid, nil)
+			if household[pid] {
+				if status != http.StatusOK {
+					t.Errorf("household member %s: got %d", pid, status)
+				}
+				seen++
+			} else if status != http.StatusNotFound {
+				t.Errorf("person %s of another unit: expected 404, got %d", pid, status)
+			}
+		}
+		if len(got) < 100 {
+			break
+		}
+	}
+	if seen != len(household) {
+		t.Errorf("household members reached: %d of %d", seen, len(household))
+	}
+	listed := morador.items("/people?pageSize=100")
+	if len(listed) != len(household) {
+		t.Errorf("the resident lists %d people, her household has %d", len(listed), len(household))
+	}
+	for _, it := range listed {
+		if it["cpf"] != nil && it["id"] != selfID {
+			t.Errorf("another person's CPF in the resident's list: %v", it)
+		}
+	}
+	if got := morador.items("/units?pageSize=100"); len(got) != 1 {
+		t.Errorf("the resident should see one unit, sees %d", len(got))
+	}
+
+	// The porteiro sees names and units of everyone, nothing personal.
+	list := porteiro.items("/people?pageSize=100")
+	if len(list) != 100 {
+		t.Fatalf("porteiro list: %d", len(list))
+	}
+	for _, it := range list {
+		if it["cpf"] != nil || it["email"] != nil || it["phone"] != nil || it["hasAccount"] != nil {
+			t.Errorf("porteiro sees personal data: %v", it)
+		}
+	}
+	// The tenant (inquilino) is responsible for another unit and cannot reach into the first one.
+	unit2 := inquilino.call("GET", "/me/units", nil, http.StatusOK)["items"].([]any)[0].(map[string]any)["unitId"].(string)
+	inquilino.call("GET", "/units/"+unitID+"/links", nil, http.StatusNotFound)
+	inquilino.call("POST", "/units/"+unitID+"/links", map[string]any{"kind": "dependente", "person": map[string]any{"fullName": "Intruso"}}, http.StatusNotFound)
+	inquilino.call("POST", "/units/"+unit2+"/links", map[string]any{"kind": "dependente", "person": map[string]any{"fullName": "Filho do Inquilino"}}, http.StatusCreated)
 }

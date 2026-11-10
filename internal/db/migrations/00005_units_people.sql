@@ -50,7 +50,7 @@ CREATE TABLE blocks (
 ALTER TABLE residents
     ADD COLUMN block_id uuid,
     ADD CONSTRAINT residents_block_fkey FOREIGN KEY (condominium_id, block_id)
-        REFERENCES blocks (condominium_id, id) ON DELETE RESTRICT,
+        REFERENCES blocks (condominium_id, id),
     ADD CONSTRAINT residents_condominium_id_key UNIQUE (condominium_id, id);
 
 -- O texto livre "condominiumId" da API antiga fazia o papel de bloco (a unicidade do
@@ -114,7 +114,7 @@ CREATE TABLE unit_links (
         REFERENCES residents (condominium_id, id) ON DELETE CASCADE,
     -- Uma pessoa com histórico não é apagada; o vínculo é encerrado.
     CONSTRAINT unit_links_person_fkey FOREIGN KEY (condominium_id, person_id)
-        REFERENCES people (condominium_id, id) ON DELETE RESTRICT,
+        REFERENCES people (condominium_id, id),
     -- Dois proprietários principais no mesmo período: nunca.
     CONSTRAINT unit_links_one_owner EXCLUDE USING gist (
         unit_id WITH =, daterange(starts_on, ends_on) WITH &&

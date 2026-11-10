@@ -42,6 +42,12 @@ func seed(t *testing.T, env *dbtest.Env, condo, tag string) string {
 	}{
 		{`INSERT INTO memberships (user_id, condominium_id, roles) VALUES ($1, $2, '{morador}')`, []any{userID, condo}, nil},
 		{`INSERT INTO residents (condominium_id, condominium_ref, unit_number, owner_id) VALUES ($1, 'bloco', '101-' || $2::text, $3)`, []any{condo, tag, userID}, nil},
+		{`INSERT INTO blocks (condominium_id, name) VALUES ($1, 'Bloco ' || $2::text)`, []any{condo, tag}, nil},
+		{`INSERT INTO people (condominium_id, full_name, email) VALUES ($1, 'Pessoa ' || $2::text, $2::text || '@exemplo.test')`, []any{condo, tag}, nil},
+		{`INSERT INTO unit_links (condominium_id, unit_id, person_id, kind, starts_on)
+		  SELECT $1, r.id, p.id, 'morador', '2020-01-01' FROM residents r, people p WHERE r.condominium_id = $1 AND p.condominium_id = $1`, []any{condo}, nil},
+		{`INSERT INTO invitations (condominium_id, person_id, email, token_hash, channel, expires_at)
+		  SELECT $1, p.id, p.email, decode(md5($2), 'hex'), 'link', now() + interval '1 day' FROM people p WHERE p.condominium_id = $1`, []any{condo, tag}, nil},
 		{`INSERT INTO shop_owners (condominium_id, shop_name, cnpj, owner_id) VALUES ($1, 'Loja', '00.000.000/0001-' || $2::text, $3)`, []any{condo, tag, userID}, nil},
 		{`INSERT INTO expenses (condominium_id, description, amount_cents, due_date) VALUES ($1, 'Água', 100, now())`, []any{condo}, nil},
 		{`INSERT INTO notifications (condominium_id, message, created_by_id) VALUES ($1, 'Aviso', $2) RETURNING id::text`, []any{condo, userID}, &notifID},
@@ -81,6 +87,10 @@ var tenantTables = []struct{ table, update string }{
 	{"memberships", `UPDATE memberships SET roles = '{sindico}'`},
 	{"residents", `UPDATE residents SET floor = 99`},
 	{"shop_owners", `UPDATE shop_owners SET floor = 99`},
+	{"blocks", `UPDATE blocks SET name = 'hacked'`},
+	{"people", `UPDATE people SET full_name = 'hacked'`},
+	{"unit_links", `UPDATE unit_links SET ends_on = '2030-01-01'`},
+	{"invitations", `UPDATE invitations SET revoked_at = now()`},
 	{"expenses", `UPDATE expenses SET amount_cents = 999999`},
 	{"notifications", `UPDATE notifications SET message = 'hacked'`},
 	{"notification_reads", `UPDATE notification_reads SET read_at = now() - interval '1 year'`},
@@ -153,6 +163,10 @@ func TestRLS_UserOfACannotChangeB(t *testing.T) {
 		`SELECT count(*) FROM memberships WHERE condominium_id = $1 AND roles <> '{morador}'`,
 		`SELECT count(*) FROM residents WHERE condominium_id = $1 AND floor = 99`,
 		`SELECT count(*) FROM shop_owners WHERE condominium_id = $1 AND floor = 99`,
+		`SELECT count(*) FROM blocks WHERE condominium_id = $1 AND name = 'hacked'`,
+		`SELECT count(*) FROM people WHERE condominium_id = $1 AND full_name = 'hacked'`,
+		`SELECT count(*) FROM unit_links WHERE condominium_id = $1 AND ends_on IS NOT NULL`,
+		`SELECT count(*) FROM invitations WHERE condominium_id = $1 AND revoked_at IS NOT NULL`,
 		`SELECT count(*) FROM expenses WHERE condominium_id = $1 AND amount_cents = 999999`,
 		`SELECT count(*) FROM notifications WHERE condominium_id = $1 AND message = 'hacked'`,
 		`SELECT count(*) FROM notification_reads WHERE condominium_id = $1 AND read_at < now() - interval '6 months'`,
@@ -169,7 +183,7 @@ func TestRLS_UserOfACannotDeleteB(t *testing.T) {
 	ctx := asUser(f, a)
 	scoped := db.NewScoped(f.env.Pool)
 	// Children first: the foreign keys would otherwise stop the unfiltered DELETEs.
-	for _, table := range []string{"notification_reads", "refresh_tokens", "notifications", "expenses", "residents", "shop_owners"} {
+	for _, table := range []string{"notification_reads", "refresh_tokens", "notifications", "expenses", "invitations", "unit_links", "people", "residents", "blocks", "shop_owners"} {
 		tag, err := scoped.Exec(ctx, "DELETE FROM "+table)
 		if err != nil {
 			t.Fatalf("DELETE FROM %s: %v", table, err)
@@ -203,6 +217,8 @@ func TestRLS_UserOfACannotWriteIntoB(t *testing.T) {
 		"expenses":      `INSERT INTO expenses (condominium_id, description, amount_cents, due_date) VALUES ('` + b + `', 'x', 1, now())`,
 		"notifications": `INSERT INTO notifications (condominium_id, message, created_by_id) VALUES ('` + b + `', 'x', 'x')`,
 		"memberships":   `INSERT INTO memberships (user_id, condominium_id, roles) VALUES ('` + f.userIDs[a] + `', '` + b + `', '{sindico}')`,
+		"blocks":        `INSERT INTO blocks (condominium_id, name) VALUES ('` + b + `', 'x')`,
+		"people":        `INSERT INTO people (condominium_id, full_name) VALUES ('` + b + `', 'x')`,
 		"audit_log":     `INSERT INTO audit_log (condominium_id, action, resource) VALUES ('` + b + `', 'create', 'x')`,
 		"condominiums":  `INSERT INTO condominiums (name) VALUES ('sneaky')`,
 	}
@@ -229,7 +245,7 @@ func TestRLS_FailsClosedWithoutATenant(t *testing.T) {
 		"unknown tenant": tenant.WithCondominiumID(context.Background(), "c0000000-0000-4000-8000-00000000000c"),
 		"sql in tenant":  tenant.WithCondominiumID(context.Background(), a+"' OR '1'='1"),
 	}
-	tables := []string{"users", "condominiums", "administrators", "memberships", "residents", "shop_owners", "expenses", "notifications", "notification_reads", "refresh_tokens", "audit_log", "account_tokens", "recovery_codes"}
+	tables := []string{"users", "condominiums", "administrators", "memberships", "residents", "shop_owners", "expenses", "notifications", "notification_reads", "refresh_tokens", "audit_log", "account_tokens", "recovery_codes", "blocks", "people", "unit_links", "invitations"}
 	for name, ctx := range contexts {
 		for _, table := range tables {
 			if n := count(t, f.env.Pool, ctx, "SELECT count(*) FROM "+table); n != 0 {

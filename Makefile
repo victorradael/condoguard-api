@@ -1,4 +1,4 @@
-.PHONY: test test-unit test-integration test-cover lint fmt vet build run up down logs dev-up dev-down \
+.PHONY: seed seed-poc reset-demo test test-unit test-integration test-cover lint fmt vet build run up down logs dev-up dev-down \
 	tidy sqlc sqlc-check migrate-up migrate-down migrate-reset migrate-version test-db-up test-db-down
 
 BINARY = condoguard-api
@@ -88,3 +88,15 @@ dev-up:
 
 dev-down:
 	docker compose down
+
+# ── Dados fictícios (is_demo) ─────────────────────────────────────────────────
+# Precisam de DATABASE_URL; reset-demo também de DATABASE_MIGRATIONS_URL.
+# SEED_PASSWORD define a senha das contas de teste (sem ela, uma aleatória é impressa).
+seed:
+	go run ./cmd/seed --profile=seed
+
+seed-poc:
+	go run ./cmd/seed --profile=poc
+
+reset-demo:
+	go run ./cmd/seed --profile=poc --reset-demo
