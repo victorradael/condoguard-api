@@ -128,8 +128,8 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*Re
 	}
 
 	err = s.trail.Atomic(ctx, func(ctx context.Context) (audit.Entry, error) {
-		if err := s.repo.Update(ctx, res); err != nil {
-			return audit.Entry{}, err
+		if uerr := s.repo.Update(ctx, res); uerr != nil {
+			return audit.Entry{}, uerr
 		}
 		return audit.Entry{Action: audit.ActionUpdate, Resource: auditResource, ResourceID: res.ID, Before: before, After: res}, nil
 	})

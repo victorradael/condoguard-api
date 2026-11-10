@@ -130,7 +130,7 @@ func (r *MemoryIdentity) Memberships(_ context.Context, userID string) ([]Member
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var out []Membership
+	out := make([]Membership, 0, len(r.memberships[userID]))
 	for condo, roles := range r.memberships[userID] {
 		out = append(out, Membership{CondominiumID: condo, Name: condo, Roles: slices.Clone(roles)})
 	}

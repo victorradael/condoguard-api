@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+
 	"github.com/google/uuid"
 
 	"github.com/victorradael/condoguard/api/internal/db"

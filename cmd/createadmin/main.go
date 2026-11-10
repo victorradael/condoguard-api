@@ -81,9 +81,9 @@ func run() error {
 		return err
 	}
 	if !found {
-		c, err := condos.Create(ctx, condoID, os.Getenv("ADMINISTRATOR_NAME"))
-		if err != nil {
-			return err
+		c, cerr := condos.Create(ctx, condoID, os.Getenv("ADMINISTRATOR_NAME"))
+		if cerr != nil {
+			return cerr
 		}
 		id = c.ID
 		fmt.Printf("condominium %q created (id %s)\n", c.Name, c.ID)

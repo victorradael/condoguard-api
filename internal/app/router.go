@@ -409,7 +409,7 @@ func newHandler(cfg Config, jwtSvc *pkgjwt.Service, pool *pgxpool.Pool, lim limi
 		authRepo = auth.NewPostgresRepository(pool)
 		tokenStore = auth.NewPostgresTokenStore(pool)
 		accountStore = account.NewPostgresStore(pool)
-		mfaStore, sessions = authRepo.(auth.MFAStore), accountStore
+		mfaStore, sessions = mustImplement[auth.MFAStore](authRepo), accountStore
 		userRepo = user.NewPostgresRepository(pool)
 		residentRepo = resident.NewPostgresRepository(pool)
 		shopRepo = shopowner.NewPostgresRepository(pool)
@@ -422,7 +422,7 @@ func newHandler(cfg Config, jwtSvc *pkgjwt.Service, pool *pgxpool.Pool, lim limi
 		identity := auth.NewMemoryIdentity()
 		authRepo, mfaStore, accountStore = identity, identity, identity.AccountStore()
 		tokenStore = auth.NewInMemoryTokenStore()
-		sessions = tokenStore.(auth.SessionRevoker)
+		sessions = mustImplement[auth.SessionRevoker](tokenStore)
 		identity.RevokeThrough(sessions)
 		userRepo = user.NewInMemoryRepository()
 		residentRepo = resident.NewInMemoryRepository()
@@ -523,4 +523,14 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
+}
+
+// mustImplement narrows a wired dependency to the interface the router also
+// needs. A miss is a wiring bug, so it fails at startup rather than at runtime.
+func mustImplement[T any](v any) T {
+	t, ok := v.(T)
+	if !ok {
+		panic(fmt.Sprintf("app: %T does not implement %T", v, (*T)(nil)))
+	}
+	return t
 }

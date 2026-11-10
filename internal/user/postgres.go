@@ -32,8 +32,8 @@ func (r *postgresRepository) Save(ctx context.Context, u *User) error {
 	}
 	id := uuid.New()
 	err = db.InTx(ctx, r.pool, func(ctx context.Context) error {
-		if err := r.q.InsertUser(ctx, dbgen.InsertUserParams{ID: id, Username: u.Username, Email: u.Email, PasswordHash: u.Password}); err != nil {
-			return err
+		if ierr := r.q.InsertUser(ctx, dbgen.InsertUserParams{ID: id, Username: u.Username, Email: u.Email, PasswordHash: u.Password}); ierr != nil {
+			return ierr
 		}
 		return r.q.InsertMembership(ctx, dbgen.InsertMembershipParams{UserID: id, CondominiumID: condoID, Roles: nonNil(u.Roles)})
 	})
@@ -97,11 +97,11 @@ func (r *postgresRepository) Update(ctx context.Context, u *User) error {
 		return ErrNotFound
 	}
 	err = db.InTx(ctx, r.pool, func(ctx context.Context) error {
-		n, err := r.q.UpdateUser(ctx, dbgen.UpdateUserParams{
+		n, uerr := r.q.UpdateUser(ctx, dbgen.UpdateUserParams{
 			CondominiumID: condoID, ID: uid, Username: u.Username, Email: u.Email, PasswordHash: u.Password,
 		})
-		if err != nil {
-			return err
+		if uerr != nil {
+			return uerr
 		}
 		if n == 0 {
 			return ErrNotFound

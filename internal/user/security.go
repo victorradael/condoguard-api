@@ -48,16 +48,18 @@ func (s *Service) IssueLink(ctx context.Context, id, purpose string) (account.Li
 		return link, errors.New("user: account links are not configured")
 	}
 	err = s.trail.Atomic(ctx, func(ctx context.Context) (audit.Entry, error) {
-		target, err := s.repo.FindByID(ctx, id)
-		if err != nil {
-			return audit.Entry{}, err
+		target, ferr := s.repo.FindByID(ctx, id)
+		if ferr != nil {
+			return audit.Entry{}, ferr
 		}
 		if !mayGrant(p, target.Roles) {
 			return audit.Entry{}, authz.ErrForbidden
 		}
-		if link, err = s.links.IssueLink(ctx, id, purpose, p.UserID); err != nil {
-			return audit.Entry{}, err
+		issued, ierr := s.links.IssueLink(ctx, id, purpose, p.UserID)
+		if ierr != nil {
+			return audit.Entry{}, ierr
 		}
+		link = issued
 		return audit.Entry{Action: ActionIssueLink, Resource: auditResource, ResourceID: id,
 			After: map[string]any{"purpose": purpose, "expiresAt": link.ExpiresAt}}, nil
 	})

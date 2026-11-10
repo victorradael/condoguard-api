@@ -40,7 +40,6 @@ type flow struct {
 	srv  *httptest.Server
 	mail *mailer.Memory
 	url  string
-	now  time.Time
 }
 
 func newFlow(t *testing.T) *flow {

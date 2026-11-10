@@ -83,8 +83,8 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*User, error) 
 	}
 
 	err = s.trail.Atomic(ctx, func(ctx context.Context) (audit.Entry, error) {
-		if err := s.repo.Save(ctx, u); err != nil {
-			return audit.Entry{}, err
+		if serr := s.repo.Save(ctx, u); serr != nil {
+			return audit.Entry{}, serr
 		}
 		return audit.Entry{Action: audit.ActionCreate, Resource: auditResource, ResourceID: u.ID, After: u}, nil
 	})
@@ -130,8 +130,8 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*Us
 		return nil, err
 	}
 	if len(req.Roles) > 0 {
-		if err := validateRoles(req.Roles); err != nil {
-			return nil, err
+		if verr := validateRoles(req.Roles); verr != nil {
+			return nil, verr
 		}
 		if !mayGrant(p, req.Roles) {
 			return nil, authz.ErrForbidden
@@ -157,12 +157,12 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*Us
 	// req.Email is silently ignored — business rule: email is immutable.
 
 	err = s.trail.Atomic(ctx, func(ctx context.Context) (audit.Entry, error) {
-		if err := s.repo.Update(ctx, u); err != nil {
-			return audit.Entry{}, err
+		if uerr := s.repo.Update(ctx, u); uerr != nil {
+			return audit.Entry{}, uerr
 		}
 		if rolesChanged {
-			if err := s.repo.RevokeSessions(ctx, u.ID); err != nil {
-				return audit.Entry{}, err
+			if rerr := s.repo.RevokeSessions(ctx, u.ID); rerr != nil {
+				return audit.Entry{}, rerr
 			}
 		}
 		return audit.Entry{Action: audit.ActionUpdate, Resource: auditResource, ResourceID: u.ID, Before: before, After: u}, nil
