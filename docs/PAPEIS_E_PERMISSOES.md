@@ -26,6 +26,10 @@
 | `notifications.write` | ✅ | ✅ | | | |
 | `notifications.read_all` | ✅ | ✅ | ✅ | | só as endereçadas às suas |
 | `audit.read` (trilha de auditoria) | ✅ | ✅ | ✅ | | |
+| `people.write` (pessoas, vínculos, trocas, convites, importação CSV) | ✅ | ✅ | | | só `morador`/`dependente` da própria unidade, se for responsável |
+| `people.read_all` (nomes e unidades vigentes) | ✅ | ✅ | ✅ | ✅ | só a casa dele |
+| `people.read_contact` (e-mail, telefone, CPF mascarado, histórico da unidade) | ✅ | ✅ | ✅ | | |
+| `people.read_cpf` (CPF inteiro) | ✅ | ✅ | | | só o próprio |
 
 Todo usuário autenticado lê a própria conta (`GET /users/me`) e o condomínio do token (`GET /condominium`).
 
@@ -89,3 +93,15 @@ trilha nem trilha sem mudança. Leitura: `GET /audit-log?resource=&resourceId=&p
 - `REQUIRE_VERIFIED_EMAIL` (padrão: ligado em produção) recusa o login até confirmar o e-mail (`403 email_not_verified`).
 - Variáveis: `TOTP_ENCRYPTION_KEY` (Base64 de 32 bytes), `WEB_BASE_URL`, `SMTP_HOST`/`SMTP_PORT`/`SMTP_USERNAME`/`SMTP_PASSWORD`/`MAIL_FROM`,
   `TOTP_ISSUER`; as três primeiras são obrigatórias com `APP_ENV=production`.
+
+## Pessoas, vínculos e convites (migração 00005)
+
+Detalhes e rotas em [UNIDADES_E_MORADORES.md](UNIDADES_E_MORADORES.md). Em resumo:
+
+- Quem é "dono" de uma unidade deixou de ser o campo `ownerId`: vem dos **vínculos** (`unit_links`) da pessoa ligada à conta.
+  O morador enxerga as unidades onde tem vínculo vigente de qualquer papel menos `dependente` (despesas e avisos seguem a mesma regra).
+- O **responsável** pela unidade (proprietário, coproprietário ou inquilino vigente) cadastra e encerra `morador` e `dependente` dela. Isso
+  é checado no banco a cada chamada, não no token.
+- Dados pessoais por necessidade: porteiro vê nome e unidade; conselho soma contato e CPF mascarado; síndico e administradora veem tudo;
+  morador vê a própria ficha e o contato de quem mora com ele, nunca o CPF dos outros. O que o papel não vê responde 404.
+- Aceitar convite cria conta com o papel `morador` apenas. Porteiro, conselho e síndico continuam sendo criados em `POST /users`.
